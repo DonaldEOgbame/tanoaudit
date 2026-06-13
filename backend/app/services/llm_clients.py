@@ -12,7 +12,7 @@ import httpx
 
 from app.core.config import settings
 
-SEGMENT_TIMEOUT_S = 30.0
+SEGMENT_TIMEOUT_S = settings.segment_timeout_s
 # Cap on analysis JSON output. Set generously: a batch covers many segments, and
 # if the model truncates its JSON the trailing segments come back unparseable
 # (recovered by re-analysis, but cheaper to avoid). Models clamp to their own

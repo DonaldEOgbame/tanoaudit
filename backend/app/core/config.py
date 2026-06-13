@@ -63,6 +63,11 @@ class Settings(BaseSettings):
 
     # Redis (event bus + arq task queue)
     redis_url: str = "redis://localhost:6379/0"
+    # Connect timeout (seconds) for the event-bus Redis client. Must allow for a
+    # TLS handshake to a managed/remote Redis (e.g. Upstash rediss://), which can
+    # take >1s — too low and the bus silently falls back to in-memory, breaking
+    # cross-process live scan events while arq still works.
+    redis_connect_timeout: float = 5.0
     # Task dispatch. When enabled AND Redis is reachable, scans/fixes/exports are
     # enqueued to the arq worker; otherwise they fall back to in-process
     # execution (FastAPI BackgroundTasks / the polling worker). Auto = decide by
@@ -82,6 +87,10 @@ class Settings(BaseSettings):
     # large scans (the LLM calls are the slow part and are independent). Keep
     # modest to respect provider rate limits; 1 = fully sequential.
     analysis_concurrency: int = 4
+    # Per-request timeout (seconds) for one analysis LLM call. A batch packs many
+    # segments, so a slow model can take a while on a large prompt — too low and
+    # big batches time out and get dropped/retried. Bump for slow providers.
+    segment_timeout_s: float = 60.0
 
     # LLM model IDs per provider (override to track provider releases).
     # `gemini-flash-latest` works on the free tier; `gemini-2.0-flash` has had
