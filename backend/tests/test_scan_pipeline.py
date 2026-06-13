@@ -431,6 +431,59 @@ async def test_analyze_batch_recovers_truncated_segments():
     assert calls["n"] >= 2                        # the recovery actually ran
 
 
+async def test_concurrent_batches_complete_and_order_findings(auth, tmp_path):
+    """With concurrency>1, batches run in parallel but results must still be
+    correct: every segment analyzed, findings attributed to the right file,
+    progress reaches 100%."""
+    import asyncio as _asyncio
+    import json as _json
+    import random
+    import re as _re
+    from app.core.config import settings as _settings
+
+    client, headers, _ = auth
+    src = tmp_path / "repo"
+    src.mkdir()
+    # 12 files, each its own segment; half contain SQLi.
+    for i in range(12):
+        if i % 2 == 0:
+            (src / f"f{i}.js").write_text(f"const r = db.raw(`SELECT * FROM t{i}`);\n")
+        else:
+            (src / f"f{i}.py").write_text(f"def fn{i}(a):\n    return a + {i}\n")
+
+    async def jittery(prompt, model_hint):
+        await _asyncio.sleep(random.uniform(0, 0.05))  # out-of-order completion
+        if "### SEGMENT 0" in prompt:
+            blocks = _re.findall(r"### SEGMENT (\d+).*?```\n(.*?)\n```", prompt, _re.DOTALL)
+            return _json.dumps({"results": {i: _seg_result(_has_sqli(code)) for i, code in blocks}})
+        return _json.dumps(_seg_result(_has_sqli(prompt)))
+
+    # Force small batches so there are several concurrent ones.
+    old_tok, old_conc = _settings.analysis_batch_tokens, _settings.analysis_concurrency
+    _settings.analysis_batch_tokens = 30
+    _settings.analysis_concurrency = 5
+    try:
+        async with SessionLocal() as db:
+            scan = Scan(user_id=(await _current_user_id(client, headers)),
+                        source_type="zip", repo="user/conc", models=["gemini"])
+            db.add(scan); await db.commit(); sid = scan.id
+        await run_scan(sid, complete=jittery, workdir=str(src), cleanup=False)
+    finally:
+        _settings.analysis_batch_tokens = old_tok
+        _settings.analysis_concurrency = old_conc
+
+    r = await client.get(f"{PREFIX}/scans/{sid}", headers=headers)
+    s = r.json()["data"]
+    assert s["status"] == SCAN_COMPLETED
+    assert s["segments_analyzed"] == s["segment_total"] == 12
+    assert s["segments_unparsed"] == 0
+    r = await client.get(f"{PREFIX}/scans/{sid}/findings?engine=security", headers=headers)
+    findings = r.json()["data"]
+    assert len(findings) == 6                      # one per SQLi file, none lost
+    # Each finding is attributed to a .js file (the ones with SQLi), not mixed up.
+    assert all(f["file"].endswith(".js") for f in findings)
+
+
 async def test_create_scan_validation(auth):
     client, headers, _ = auth
     # url type without source_url -> 400

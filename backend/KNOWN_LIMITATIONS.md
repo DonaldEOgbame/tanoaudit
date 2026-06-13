@@ -144,6 +144,16 @@ to the live API is underway, **foundation-first**:
   results keyed by segment index, preserving per-segment line numbers, events,
   counters, scores, and per-segment salvage. A batch of one reuses the
   single-segment path. Set the budget to 0 to disable.
+- ✅ **Concurrent batches cut wall-clock time.** Batches run up to
+  `ANALYSIS_CONCURRENCY` (default 4) at a time via `asyncio` + a semaphore — the
+  model calls (the slow part) overlap, while results are still *processed* in
+  batch order so events/findings/progress stay deterministic. Pause/cancel is
+  honored per batch and pending model calls are cancelled on early stop.
+  **DB note:** result writes use a short session *per batch* (committed and
+  closed each batch) rather than one session held open for the whole scan — a
+  long-lived transaction otherwise locks SQLite for the scan's duration (a real
+  bug this change surfaced and fixed). `ANALYSIS_CONCURRENCY=1` is fully
+  sequential.
 - ✅ **Truncated-batch recovery.** When the model truncates its JSON (some
   segment indices missing while others parsed), the missing segments are
   *re-analyzed* — as a smaller sub-batch, recursively halving down to the

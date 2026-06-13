@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     # Gemini free tier's 25 req/day) but bigger prompts. Set to 0 to disable
     # batching (one request per segment).
     analysis_batch_tokens: int = 6000
+    # How many analysis batches to run concurrently. >1 cuts wall-clock time on
+    # large scans (the LLM calls are the slow part and are independent). Keep
+    # modest to respect provider rate limits; 1 = fully sequential.
+    analysis_concurrency: int = 4
 
     # LLM model IDs per provider (override to track provider releases).
     # `gemini-flash-latest` works on the free tier; `gemini-2.0-flash` has had

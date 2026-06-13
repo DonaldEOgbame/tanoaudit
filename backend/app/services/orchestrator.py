@@ -281,6 +281,7 @@ async def run_scan(
         unparsed = 0
         total = len(segments) or 1
         started = utcnow()
+        include_optimization = scan.include_optimization  # captured before per-batch sessions
 
         # Group segments into batches so we make far fewer LLM requests (one per
         # batch instead of one per segment) — essential under tight provider
@@ -294,55 +295,76 @@ async def run_scan(
             batches = [[s] for s in segments]
         logger.info("scan %s: %d segments in %d batch(es)", scan_id, len(segments), len(batches))
 
-        async with SessionLocal() as db:
-            scan = await db.get(Scan, scan_id)
-            idx = 0
-            for batch in batches:
-                await _await_resume_or_cancel(scan_id)  # honor pause/cancel per batch
-                # One LLM call for the whole batch.
-                batch_results = await analyze_batch(
+        # Run batches concurrently (bounded) — the LLM calls dominate wall-clock
+        # and are independent. Results are still *processed* in batch order so
+        # events/findings/progress stay deterministic; only the model calls
+        # overlap. concurrency=1 reproduces the old sequential behavior.
+        concurrency = max(1, settings.analysis_concurrency)
+        sem = asyncio.Semaphore(concurrency)
+
+        async def _run_batch(batch):
+            async with sem:
+                # Pause/cancel is checked here so a paused scan stops launching
+                # new model calls (already-running ones finish).
+                await _await_resume_or_cancel(scan_id)
+                return await analyze_batch(
                     batch, complete,
-                    include_optimization=scan.include_optimization,
+                    include_optimization=include_optimization,
                     custom_vulns=custom_targets,
                     suppressions=suppressions,
                 )
-                await _drain_router_events(scan_id, router)
-                for seg, result in zip(batch, batch_results):
-                    idx += 1
-                    db.add(Segment(
-                        scan_id=scan_id, file_path=seg.file_path, language=seg.language,
-                        line_start=seg.line_start, line_end=seg.line_end,
-                        content_hash=seg.content_hash, analyzed=result is not None,
-                    ))
-                    if result is not None:
-                        analyzed += 1
-                        opt_scores.append(result.segment_scores.optimization_score)
-                        for finding in _result_to_findings(
-                            scan_id, seg, result, sec_counter, opt_counter, model_hint,
-                            stub_counter=stub_counter, intentional_hashes=intentional_hashes,
-                        ):
-                            db.add(finding)
-                            await db.flush()
-                            await ev.bus.publish(
-                                scan_id, ev.FINDING_DISCOVERED,
-                                FindingOut.model_validate(finding).model_dump(mode="json"),
-                            )
-                    else:
-                        # Segment dropped (missing/unparseable in the batch): its
-                        # findings are lost. Track it so the scan can surface a
-                        # recall-miss count instead of failing silently.
-                        unparsed += 1
 
-                    await ev.bus.publish(scan_id, ev.SEGMENT_COMPLETED, {
-                        "analyzed": analyzed, "total": len(segments),
-                    })
-                    percent = round(idx / total * 100)
-                    elapsed = (utcnow() - started).total_seconds()
-                    eta = round(elapsed / idx * (total - idx)) if idx else None
-                    await ev.bus.publish(scan_id, ev.SCAN_PROGRESS, {
-                        "percent": percent, "elapsed": round(elapsed), "eta": eta,
-                    })
-            await db.commit()
+        # Schedule all batches; they execute up to `concurrency` at a time. We do
+        # NOT hold a DB session open across this (a long-lived transaction would
+        # lock the DB for the whole scan); each batch's writes use a short session.
+        tasks = [asyncio.create_task(_run_batch(b)) for b in batches]
+        idx = 0
+        try:
+            for batch, task in zip(batches, tasks):
+                batch_results = await task  # in submission order
+                await _drain_router_events(scan_id, router)
+                async with SessionLocal() as db:
+                    for seg, result in zip(batch, batch_results):
+                        idx += 1
+                        db.add(Segment(
+                            scan_id=scan_id, file_path=seg.file_path, language=seg.language,
+                            line_start=seg.line_start, line_end=seg.line_end,
+                            content_hash=seg.content_hash, analyzed=result is not None,
+                        ))
+                        if result is not None:
+                            analyzed += 1
+                            opt_scores.append(result.segment_scores.optimization_score)
+                            for finding in _result_to_findings(
+                                scan_id, seg, result, sec_counter, opt_counter, model_hint,
+                                stub_counter=stub_counter, intentional_hashes=intentional_hashes,
+                            ):
+                                db.add(finding)
+                                await db.flush()
+                                await ev.bus.publish(
+                                    scan_id, ev.FINDING_DISCOVERED,
+                                    FindingOut.model_validate(finding).model_dump(mode="json"),
+                                )
+                        else:
+                            # Segment dropped (missing/unparseable in the batch): its
+                            # findings are lost. Track it so the scan can surface a
+                            # recall-miss count instead of failing silently.
+                            unparsed += 1
+
+                        await ev.bus.publish(scan_id, ev.SEGMENT_COMPLETED, {
+                            "analyzed": analyzed, "total": len(segments),
+                        })
+                        percent = round(idx / total * 100)
+                        elapsed = (utcnow() - started).total_seconds()
+                        eta = round(elapsed / idx * (total - idx)) if idx else None
+                        await ev.bus.publish(scan_id, ev.SCAN_PROGRESS, {
+                            "percent": percent, "elapsed": round(elapsed), "eta": eta,
+                        })
+                    await db.commit()
+        finally:
+            # If we stop early (cancel/error), don't leave model calls running.
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
 
         # Cross-model verification of Criticals (only with >=2 keyed providers).
         if router is not None and len([p for p in router.order if p in router.keys]) >= 2:
