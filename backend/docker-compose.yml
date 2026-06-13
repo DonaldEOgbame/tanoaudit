@@ -1,0 +1,41 @@
+services:
+  api:
+    build: .
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+
+  # Worker for scan orchestration. Primary dispatch is the arq task queue
+  # (retries, backpressure, runs the watchlist/orphan-recovery/digest crons).
+  # Scales horizontally: run multiple replicas safely.
+  # Redis-less / dev fallback: swap the command for the polling worker —
+  #   command: ["python", "-m", "app.worker"]
+  worker:
+    build: .
+    command: ["arq", "app.worker.WorkerSettings"]
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: akira
+      POSTGRES_PASSWORD: akira
+      POSTGRES_DB: akira
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:

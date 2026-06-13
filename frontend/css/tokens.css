@@ -1,0 +1,212 @@
+/* VaultScan design tokens — 3 themes (carbon / mono / warm) × dark / light */
+
+:root {
+  /* Type */
+  --font-ui: "Geist", -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Severity system — constant across themes */
+  --sev-critical: #ef4444;
+  --sev-high: #f59e0b;
+  --sev-medium: #eab308;
+  --sev-low: #3b82f6;
+  --sev-info: #8b8f98;
+  --sev-clean: #10b981;
+  --sev-opt: #a78bfa;
+  --sev-stub: #14b8a6;
+
+  --sev-critical-bg: rgba(239, 68, 68, 0.12);
+  --sev-high-bg: rgba(245, 158, 11, 0.12);
+  --sev-medium-bg: rgba(234, 179, 8, 0.12);
+  --sev-low-bg: rgba(59, 130, 246, 0.12);
+  --sev-info-bg: rgba(139, 143, 152, 0.14);
+  --sev-clean-bg: rgba(16, 185, 129, 0.12);
+  --sev-opt-bg: rgba(167, 139, 250, 0.13);
+  --sev-stub-bg: rgba(20, 184, 166, 0.13);
+
+  /* Motion */
+  --ease-spring: cubic-bezier(0.22, 1.2, 0.36, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-micro: 180ms;
+  --dur-med: 320ms;
+  --dur-hero: 700ms;
+
+  /* Radii */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+}
+
+/* ============ CARBON (Linear-ish cool grays) ============ */
+html[data-theme="carbon"][data-mode="dark"] {
+  color-scheme: dark;
+  --bg-app: #0e0f12;
+  --bg-sidebar: #131418;
+  --bg-surface: #16171c;
+  --bg-raised: #1c1d24;
+  --bg-overlay: #1c1d24;
+  --bg-inset: #0a0b0d;
+  --bg-hover: rgba(255, 255, 255, 0.045);
+  --bg-active: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.085);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --text-1: #eef0f3;
+  --text-2: #9da2ae;
+  --text-3: #5f6470;
+  --accent: #10b981;
+  --accent-hover: #34d399;
+  --accent-text: #052e22;
+  --accent-soft: rgba(16, 185, 129, 0.13);
+  --shadow-card: 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-pop: 0 12px 40px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.4);
+  --code-bg: #101116;
+  --scanline: rgba(16, 185, 129, 0.07);
+}
+html[data-theme="carbon"][data-mode="light"] {
+  color-scheme: light;
+  --bg-app: #f7f8fa;
+  --bg-sidebar: #f0f1f4;
+  --bg-surface: #ffffff;
+  --bg-raised: #ffffff;
+  --bg-overlay: #ffffff;
+  --bg-inset: #eceef1;
+  --bg-hover: rgba(20, 22, 30, 0.045);
+  --bg-active: rgba(20, 22, 30, 0.08);
+  --border: rgba(18, 20, 28, 0.1);
+  --border-strong: rgba(18, 20, 28, 0.2);
+  --text-1: #16181d;
+  --text-2: #5b6069;
+  --text-3: #9298a3;
+  --accent: #0d9b6f;
+  --accent-hover: #0bab79;
+  --accent-text: #ffffff;
+  --accent-soft: rgba(13, 155, 111, 0.1);
+  --shadow-card: 0 1px 2px rgba(18,20,28,0.07);
+  --shadow-pop: 0 12px 40px rgba(18,20,28,0.16), 0 2px 8px rgba(18,20,28,0.08);
+  --code-bg: #f3f4f7;
+  --scanline: rgba(13, 155, 111, 0.06);
+}
+
+/* ============ MONO (Vercel-ish high contrast) ============ */
+html[data-theme="mono"][data-mode="dark"] {
+  color-scheme: dark;
+  --bg-app: #000000;
+  --bg-sidebar: #0a0a0a;
+  --bg-surface: #0f0f0f;
+  --bg-raised: #161616;
+  --bg-overlay: #111111;
+  --bg-inset: #000000;
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-active: rgba(255, 255, 255, 0.1);
+  --border: #262626;
+  --border-strong: #3a3a3a;
+  --text-1: #fafafa;
+  --text-2: #a1a1a1;
+  --text-3: #5c5c5c;
+  --accent: #10b981;
+  --accent-hover: #34d399;
+  --accent-text: #03241a;
+  --accent-soft: rgba(16, 185, 129, 0.12);
+  --shadow-card: 0 0 0 1px rgba(255,255,255,0.02);
+  --shadow-pop: 0 16px 48px rgba(0,0,0,0.8), 0 0 0 1px #262626;
+  --code-bg: #0a0a0a;
+  --scanline: rgba(16, 185, 129, 0.08);
+}
+html[data-theme="mono"][data-mode="light"] {
+  color-scheme: light;
+  --bg-app: #ffffff;
+  --bg-sidebar: #fafafa;
+  --bg-surface: #ffffff;
+  --bg-raised: #ffffff;
+  --bg-overlay: #ffffff;
+  --bg-inset: #f4f4f4;
+  --bg-hover: rgba(0, 0, 0, 0.045);
+  --bg-active: rgba(0, 0, 0, 0.08);
+  --border: #e4e4e4;
+  --border-strong: #c9c9c9;
+  --text-1: #111111;
+  --text-2: #666666;
+  --text-3: #a3a3a3;
+  --accent: #0c9a6e;
+  --accent-hover: #0bab79;
+  --accent-text: #ffffff;
+  --accent-soft: rgba(12, 154, 110, 0.09);
+  --shadow-card: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-pop: 0 12px 40px rgba(0,0,0,0.14), 0 0 0 1px #e8e8e8;
+  --code-bg: #f6f6f6;
+  --scanline: rgba(12, 154, 110, 0.05);
+}
+
+/* ============ WARM (Claude-like soft neutrals) ============ */
+html[data-theme="warm"][data-mode="dark"] {
+  color-scheme: dark;
+  --bg-app: #1a1915;
+  --bg-sidebar: #201f1a;
+  --bg-surface: #232219;
+  --bg-raised: #2a2920;
+  --bg-overlay: #2a2920;
+  --bg-inset: #15140f;
+  --bg-hover: rgba(255, 250, 235, 0.05);
+  --bg-active: rgba(255, 250, 235, 0.09);
+  --border: rgba(255, 248, 230, 0.09);
+  --border-strong: rgba(255, 248, 230, 0.18);
+  --text-1: #f2efe6;
+  --text-2: #a8a395;
+  --text-3: #6c6759;
+  --accent: #18bb87;
+  --accent-hover: #3acf9e;
+  --accent-text: #062e22;
+  --accent-soft: rgba(24, 187, 135, 0.13);
+  --shadow-card: 0 1px 2px rgba(0,0,0,0.35);
+  --shadow-pop: 0 12px 40px rgba(10,8,2,0.55), 0 2px 8px rgba(10,8,2,0.4);
+  --code-bg: #1d1c15;
+  --scanline: rgba(24, 187, 135, 0.07);
+}
+html[data-theme="warm"][data-mode="light"] {
+  color-scheme: light;
+  --bg-app: #faf9f5;
+  --bg-sidebar: #f2f0e9;
+  --bg-surface: #ffffff;
+  --bg-raised: #ffffff;
+  --bg-overlay: #ffffff;
+  --bg-inset: #efede4;
+  --bg-hover: rgba(60, 52, 30, 0.05);
+  --bg-active: rgba(60, 52, 30, 0.09);
+  --border: rgba(60, 52, 30, 0.12);
+  --border-strong: rgba(60, 52, 30, 0.22);
+  --text-1: #25231c;
+  --text-2: #6b665a;
+  --text-3: #a09a8b;
+  --accent: #0f9d72;
+  --accent-hover: #0caf7e;
+  --accent-text: #ffffff;
+  --accent-soft: rgba(15, 157, 114, 0.1);
+  --shadow-card: 0 1px 2px rgba(60,52,30,0.08);
+  --shadow-pop: 0 12px 40px rgba(60,52,30,0.18), 0 2px 8px rgba(60,52,30,0.08);
+  --code-bg: #f5f3ec;
+  --scanline: rgba(15, 157, 114, 0.06);
+}
+
+/* Code syntax palette (works on dark + light via mode flips) */
+html[data-mode="dark"] {
+  /* Make native form controls (select popups, scrollbars, autofill) render dark. */
+  color-scheme: dark;
+  --syn-kw: #c792ea;
+  --syn-str: #9ece6a;
+  --syn-fn: #7aa2f7;
+  --syn-num: #ff9e64;
+  --syn-com: #565f74;
+  --syn-prop: #73daca;
+  --syn-plain: #c0caf5;
+}
+html[data-mode="light"] {
+  color-scheme: light;
+  --syn-kw: #9333ea;
+  --syn-str: #16803c;
+  --syn-fn: #2563eb;
+  --syn-num: #c2570c;
+  --syn-com: #9ca3af;
+  --syn-prop: #0f766e;
+  --syn-plain: #334155;
+}
