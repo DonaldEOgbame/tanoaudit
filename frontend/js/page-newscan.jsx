@@ -34,7 +34,7 @@
     const [source, setSource] = useState({ tab: "github", repo: "user/ecommerce-api", url: "", file: null });
     const [depth, setDepth] = useState("deep");
     const [modelMode, setModelMode] = useState("auto");
-    const [models, setModels] = useState(["gemini", "groq", "openrouter"]);
+    const [models, setModels] = useState(["gemini", "openrouter"]);
     const [incCustom, setIncCustom] = useState(true);
     const [incOpt, setIncOpt] = useState(true);
 

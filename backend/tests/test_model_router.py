@@ -17,26 +17,26 @@ async def test_auto_fallback_on_rate_limit(monkeypatch):
     async def gemini(key, prompt, model=None):
         raise RateLimited("nope")
 
-    async def groq(key, prompt, model=None):
-        return Completion(text="OK-from-groq", provider="groq", model="x")
+    async def openrouter(key, prompt, model=None):
+        return Completion(text="OK-from-openrouter", provider="openrouter", model="x")
 
-    _completers(monkeypatch, {"gemini": gemini, "groq": groq})
-    r = ModelRouter(keys={"gemini": "k", "groq": "k"}, order=["gemini", "groq"], mode="auto")
+    _completers(monkeypatch, {"gemini": gemini, "openrouter": openrouter})
+    r = ModelRouter(keys={"gemini": "k", "openrouter": "k"}, order=["gemini", "openrouter"], mode="auto")
 
     out = await r.complete("prompt")
-    assert out == "OK-from-groq"
+    assert out == "OK-from-openrouter"
     # Gemini is now cooling down, and a reroute event was emitted.
     kinds = [e.kind for e in r.events]
     assert "rate_limited" in kinds
-    assert any(e.kind == "rerouted" and e.rerouted_to == "groq" for e in r.events)
+    assert any(e.kind == "rerouted" and e.rerouted_to == "openrouter" for e in r.events)
 
 
 async def test_all_exhausted_returns_empty(monkeypatch):
     async def boom(key, prompt, model=None):
         raise ProviderError("down")
 
-    _completers(monkeypatch, {"gemini": boom, "groq": boom})
-    r = ModelRouter(keys={"gemini": "k", "groq": "k"}, order=["gemini", "groq"])
+    _completers(monkeypatch, {"gemini": boom, "openrouter": boom})
+    r = ModelRouter(keys={"gemini": "k", "openrouter": "k"}, order=["gemini", "openrouter"])
     out = await r.complete("p")
     assert out == ""  # segment will be recorded unanalyzed
     assert any(e.kind == "exhausted" for e in r.events)
@@ -47,10 +47,10 @@ async def test_timeout_skips_provider(monkeypatch):
         raise ProviderTimeout("timeout")
 
     async def fast(key, prompt, model=None):
-        return Completion(text="recovered", provider="groq", model="x")
+        return Completion(text="recovered", provider="openrouter", model="x")
 
-    _completers(monkeypatch, {"gemini": slow, "groq": fast})
-    r = ModelRouter(keys={"gemini": "k", "groq": "k"}, order=["gemini", "groq"])
+    _completers(monkeypatch, {"gemini": slow, "openrouter": fast})
+    r = ModelRouter(keys={"gemini": "k", "openrouter": "k"}, order=["gemini", "openrouter"])
     assert await r.complete("p") == "recovered"
 
 
@@ -83,14 +83,14 @@ async def test_manual_round_robin(monkeypatch):
             return Completion(text=name, provider=name, model="x")
         return fn
 
-    _completers(monkeypatch, {"gemini": make("gemini"), "groq": make("groq")})
+    _completers(monkeypatch, {"gemini": make("gemini"), "openrouter": make("openrouter")})
     r = ModelRouter(
-        keys={"gemini": "k", "groq": "k"}, order=["gemini", "groq"], mode="manual"
+        keys={"gemini": "k", "openrouter": "k"}, order=["gemini", "openrouter"], mode="manual"
     )
     await r.complete("p")
     await r.complete("p")
     # Round-robin should have used both providers across two calls.
-    assert set(seen) == {"gemini", "groq"}
+    assert set(seen) == {"gemini", "openrouter"}
 
 
 async def test_stream_yields_deltas_and_reroutes(monkeypatch):
@@ -98,23 +98,23 @@ async def test_stream_yields_deltas_and_reroutes(monkeypatch):
         raise RateLimited("down")
         yield  # make it an async generator
 
-    async def groq_stream(key, prompt, model=None):
+    async def openrouter_stream(key, prompt, model=None):
         for piece in ["Hello", " ", "world"]:
             yield piece
 
-    monkeypatch.setattr(rm, "STREAMERS", {"gemini": gemini_stream, "groq": groq_stream})
-    r = ModelRouter(keys={"gemini": "k", "groq": "k"}, order=["gemini", "groq"])
+    monkeypatch.setattr(rm, "STREAMERS", {"gemini": gemini_stream, "openrouter": openrouter_stream})
+    r = ModelRouter(keys={"gemini": "k", "openrouter": "k"}, order=["gemini", "openrouter"])
     out = [chunk async for chunk in r.stream("p")]
-    assert "".join(out) == "Hello world"  # rerouted to groq after gemini 429
+    assert "".join(out) == "Hello world"  # rerouted to openrouter after gemini 429
 
 
 async def test_verification_downgrades_on_disagreement(monkeypatch):
     # Router whose verifier model says "not confirmed".
     async def verifier(key, prompt, model=None):
-        return Completion(text='{"confirmed": false, "reason": "benign"}', provider="groq", model="x")
+        return Completion(text='{"confirmed": false, "reason": "benign"}', provider="openrouter", model="x")
 
-    _completers(monkeypatch, {"groq": verifier, "gemini": verifier})
-    r = ModelRouter(keys={"gemini": "k", "groq": "k"}, order=["gemini", "groq"])
+    _completers(monkeypatch, {"openrouter": verifier, "gemini": verifier})
+    r = ModelRouter(keys={"gemini": "k", "openrouter": "k"}, order=["gemini", "openrouter"])
 
     f = Finding(
         scan_id="s", public_id="VLN-0001", engine=ENGINE_SECURITY,
@@ -125,15 +125,15 @@ async def test_verification_downgrades_on_disagreement(monkeypatch):
     await verify_criticals([f], r, None)
     assert f.severity == "high"
     assert "Downgraded from Critical" in (f.explanation or "")
-    assert f.verified_by == "Groq Llama 3.3"
+    assert f.verified_by == "OpenRouter / Claude Haiku"
 
 
 async def test_verification_confirms(monkeypatch):
     async def verifier(key, prompt, model=None):
-        return Completion(text='{"confirmed": true}', provider="groq", model="x")
+        return Completion(text='{"confirmed": true}', provider="openrouter", model="x")
 
-    _completers(monkeypatch, {"groq": verifier, "gemini": verifier})
-    r = ModelRouter(keys={"gemini": "k", "groq": "k"}, order=["gemini", "groq"])
+    _completers(monkeypatch, {"openrouter": verifier, "gemini": verifier})
+    r = ModelRouter(keys={"gemini": "k", "openrouter": "k"}, order=["gemini", "openrouter"])
     f = Finding(
         scan_id="s", public_id="VLN-0001", engine=ENGINE_SECURITY,
         category="Injection", severity="critical", confidence="High",
@@ -142,4 +142,4 @@ async def test_verification_confirms(monkeypatch):
     )
     await verify_criticals([f], r, None)
     assert f.severity == "critical"
-    assert f.verified_by == "Groq Llama 3.3"
+    assert f.verified_by == "OpenRouter / Claude Haiku"

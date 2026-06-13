@@ -175,7 +175,7 @@ async def _rescan(db: AsyncSession, repo: Repository, background: BackgroundTask
         branch=last.branch if last else None,
         depth=last.depth if last else "deep",
         model_mode=last.model_mode if last else "auto",
-        models=last.models if last else ["gemini", "groq", "openrouter"],
+        models=last.models if last else ["gemini", "openrouter"],
         include_custom=last.include_custom if last else True,
         include_optimization=last.include_optimization if last else True,
     )

@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.api_key import PROVIDERS
 
-Provider = Literal["gemini", "groq", "openrouter", "github"]
+Provider = Literal["gemini", "openrouter", "github"]
 
 
 # ---- API keys ---------------------------------------------------------------
@@ -40,7 +40,7 @@ class ModelSettings(BaseModel):
     default_model: str = "Auto"
     # Ordered provider fallback chain honoured by the scan router.
     fallback_order: list[Provider] = Field(
-        default_factory=lambda: ["gemini", "groq", "openrouter"]
+        default_factory=lambda: ["gemini", "openrouter"]
     )
     # Per-model token budget per scan, in thousands of tokens.
     token_budgets: dict[str, int] = Field(default_factory=dict)

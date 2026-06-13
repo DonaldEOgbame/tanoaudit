@@ -22,16 +22,16 @@ async def test_upsert_and_mask_key(auth):
 
 async def test_upsert_replaces_not_duplicates(auth):
     client, headers, _ = auth
-    for key in ("gsk_first_000000", "gsk_second_11111"):
+    for key in ("sk-or-first_000000", "sk-or-second_11111"):
         await client.put(
             f"{PREFIX}/settings/api-keys",
             headers=headers,
-            json={"provider": "groq", "key": key},
+            json={"provider": "openrouter", "key": key},
         )
     r = await client.get(f"{PREFIX}/settings/api-keys", headers=headers)
-    groq = [k for k in r.json()["data"] if k["provider"] == "groq"]
-    assert len(groq) == 1
-    assert groq[0]["masked"].endswith("1111")
+    openrouter_keys = [k for k in r.json()["data"] if k["provider"] == "openrouter"]
+    assert len(openrouter_keys) == 1
+    assert openrouter_keys[0]["masked"].endswith("1111")
 
 
 async def test_test_key_endpoint_marks_valid(auth, monkeypatch):
@@ -60,14 +60,14 @@ async def test_test_key_marks_invalid(auth, monkeypatch):
     await client.put(
         f"{PREFIX}/settings/api-keys",
         headers=headers,
-        json={"provider": "groq", "key": "gsk_bad_key_value"},
+        json={"provider": "openrouter", "key": "sk-or-bad_key_value"},
     )
 
     async def fake_test(provider, key):
         return False, "invalid key"
 
     monkeypatch.setattr(settings_api, "test_provider_key", fake_test)
-    r = await client.post(f"{PREFIX}/settings/api-keys/groq/test", headers=headers)
+    r = await client.post(f"{PREFIX}/settings/api-keys/openrouter/test", headers=headers)
     assert r.json()["data"]["status"] == "invalid"
 
 
@@ -103,19 +103,19 @@ async def test_invalid_provider_rejected(auth):
 async def test_model_settings_roundtrip(auth):
     client, headers, _ = auth
     r = await client.get(f"{PREFIX}/settings/models", headers=headers)
-    assert r.json()["data"]["fallback_order"] == ["gemini", "groq", "openrouter"]
+    assert r.json()["data"]["fallback_order"] == ["gemini", "openrouter"]
 
     r = await client.put(
         f"{PREFIX}/settings/models",
         headers=headers,
         json={
             "default_model": "Gemini 2.0 Flash",
-            "fallback_order": ["groq", "gemini", "openrouter"],
+            "fallback_order": ["openrouter", "gemini"],
             "token_budgets": {"Gemini 2.0 Flash": 60},
         },
     )
     data = r.json()["data"]
-    assert data["fallback_order"][0] == "groq"
+    assert data["fallback_order"][0] == "openrouter"
     assert data["token_budgets"]["Gemini 2.0 Flash"] == 60
 
     # Persisted across requests.

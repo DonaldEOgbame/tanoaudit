@@ -14,7 +14,7 @@ class ScanCreate(BaseModel):
     branch: Optional[str] = None
     depth: Literal["fast", "deep", "thorough"] = "deep"
     model_mode: Literal["auto", "manual"] = "auto"
-    models: list[str] = Field(default_factory=lambda: ["gemini", "groq", "openrouter"])
+    models: list[str] = Field(default_factory=lambda: ["gemini", "openrouter"])
     include_custom: bool = True
     include_optimization: bool = True
 

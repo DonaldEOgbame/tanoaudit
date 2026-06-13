@@ -38,7 +38,7 @@
     }),
     F({
       sev: "critical", name: "Hardcoded Stripe secret key", file: "src/services/paymentService.js", start: 1, lines: [3, 3],
-      category: "Secrets & Credentials", cwe: "CWE-798", owasp: "A07:2021", model: "Groq Llama 3.3", verified: true,
+      category: "Secrets & Credentials", cwe: "CWE-798", owasp: "A07:2021", model: "OpenRouter / Claude Haiku", verified: true,
       summary: "A live Stripe secret key is committed in source. Anyone with repo read access can issue refunds, create charges, and exfiltrate customer payment data. The key must be rotated immediately — removing it from the file is not sufficient since it remains in git history.",
       code: `const Stripe = require('stripe');
 
@@ -142,7 +142,7 @@ router.get('/orders/export', async (req, res) => {
     }),
     F({
       sev: "high", name: "Password reset token is predictable", file: "src/routes/auth.js", start: 88, lines: [90, 91],
-      category: "Authentication", cwe: "CWE-330", owasp: "A07:2021", model: "Groq Llama 3.3",
+      category: "Authentication", cwe: "CWE-330", owasp: "A07:2021", model: "OpenRouter / Claude Haiku",
       summary: "Reset tokens are generated from `Date.now()` and `Math.random()`, both predictable. An attacker who knows roughly when a reset was requested can brute-force the token space and take over accounts.",
       code: `router.post('/forgot-password', async (req, res) => {
   const user = await User.findByEmail(req.body.email);
@@ -235,7 +235,7 @@ app.use(cors({
     }),
     F({
       sev: "high", name: "bcrypt cost factor of 4 is far too low", file: "src/utils/crypto.js", start: 5, lines: [7, 7],
-      category: "Cryptography", cwe: "CWE-916", owasp: "A02:2021", model: "Groq Mixtral 8x7B",
+      category: "Cryptography", cwe: "CWE-916", owasp: "A02:2021", model: "Gemini 2.0 Flash",
       summary: "Password hashing uses bcrypt with a cost of 4 (~1 ms per hash). Modern GPUs can attempt hundreds of millions of guesses per day at this cost, making leaked hashes practical to crack.",
       code: `const bcrypt = require('bcrypt');
 
@@ -299,7 +299,7 @@ router.get('/image-proxy', async (req, res) => {
     }),
     F({
       sev: "high", name: "Session cookie missing Secure & HttpOnly flags", file: "src/index.js", start: 28, lines: [30, 34],
-      category: "Session Management", cwe: "CWE-1004", owasp: "A05:2021", model: "Groq Llama 3.3",
+      category: "Session Management", cwe: "CWE-1004", owasp: "A05:2021", model: "OpenRouter / Claude Haiku",
       summary: "Session cookies are issued without `httpOnly`, `secure`, or `sameSite`, exposing them to theft via XSS and transmission over plain HTTP.",
       code: `app.use(session({
   secret: process.env.SESSION_SECRET,
@@ -345,7 +345,7 @@ router.get('/image-proxy', async (req, res) => {
     }),
     F({
       sev: "medium", name: "No rate limiting on login endpoint", file: "src/routes/auth.js", start: 30, lines: [32, 32],
-      category: "Authentication", cwe: "CWE-307", owasp: "A07:2021", model: "Groq Llama 3.3",
+      category: "Authentication", cwe: "CWE-307", owasp: "A07:2021", model: "OpenRouter / Claude Haiku",
       summary: "`POST /auth/login` has no rate limiting or lockout, permitting credential-stuffing at full network speed. The rateLimit middleware exists in the codebase but is only applied to /api/search.",
       code: `// login
 router.post('/login', async (req, res) => {
@@ -398,7 +398,7 @@ router.patch('/me', requireAuth, async (req, res) => {
     }),
     F({
       sev: "medium", name: "Open redirect after login", file: "src/routes/auth.js", start: 52, lines: [54, 54],
-      category: "Validation", cwe: "CWE-601", owasp: "A01:2021", model: "Groq Mixtral 8x7B",
+      category: "Validation", cwe: "CWE-601", owasp: "A01:2021", model: "Gemini 2.0 Flash",
       summary: "The post-login redirect uses the `next` query parameter unvalidated, enabling phishing flows that bounce through the trusted domain.",
       code: `// after successful login
 const next = req.query.next || '/dashboard';
@@ -431,7 +431,7 @@ app.use('/orders', orderRoutes);`,
     }),
     F({
       sev: "medium", name: "Verbose user enumeration on signup", file: "src/routes/auth.js", start: 12, lines: [15, 16],
-      category: "Information Disclosure", cwe: "CWE-204", owasp: "A07:2021", model: "Groq Llama 3.3",
+      category: "Information Disclosure", cwe: "CWE-204", owasp: "A07:2021", model: "OpenRouter / Claude Haiku",
       summary: "Signup returns 'Email already registered' vs generic errors, letting attackers enumerate which emails have accounts. Combined with the unthrottled login, this enables targeted credential stuffing.",
       code: `const existing = await User.findByEmail(email);
 if (existing) {
@@ -486,7 +486,7 @@ if (existing) {
     }),
     F({
       sev: "medium", name: "Sensitive data logged in plaintext", file: "src/utils/logger.js", start: 18, lines: [20, 22],
-      category: "Information Disclosure", cwe: "CWE-532", owasp: "A09:2021", model: "Groq Llama 3.3",
+      category: "Information Disclosure", cwe: "CWE-532", owasp: "A09:2021", model: "OpenRouter / Claude Haiku",
       summary: "The request logger serializes full request bodies — including passwords on /auth/login and card fields on /payments — into application logs.",
       code: `app.use((req, res, next) => {
   logger.info({
@@ -534,7 +534,7 @@ app.use((req, res, next) => {
     // ================= LOW =================
     F({
       sev: "low", name: "Missing security headers (helmet not configured)", file: "src/index.js", start: 10, lines: [10, 12],
-      category: "Configuration", cwe: "CWE-693", owasp: "A05:2021", model: "Groq Llama 3.3",
+      category: "Configuration", cwe: "CWE-693", owasp: "A05:2021", model: "OpenRouter / Claude Haiku",
       summary: "No X-Content-Type-Options, X-Frame-Options, or Content-Security-Policy headers are set. helmet is in package.json but never mounted.",
       code: `const express = require('express');
 const app = express();
@@ -560,7 +560,7 @@ const refresh = await issueRefreshToken(user.id); // rotated on use`,
     }),
     F({
       sev: "low", name: "API version disclosure via X-Powered-By", file: "src/index.js", start: 8, lines: [8, 8],
-      category: "Information Disclosure", cwe: "CWE-200", owasp: "A05:2021", model: "Groq Mixtral 8x7B",
+      category: "Information Disclosure", cwe: "CWE-200", owasp: "A05:2021", model: "Gemini 2.0 Flash",
       summary: "Express advertises itself via the X-Powered-By header, simplifying fingerprinting.",
       code: `const app = express();`,
       vuln: [0],
@@ -588,7 +588,7 @@ router.get('/debug/config', (req, res) => {
     }),
     F({
       sev: "low", name: "Math.random() used for coupon codes", file: "src/utils/helpers.js", start: 24, lines: [25, 26],
-      category: "Cryptography", cwe: "CWE-338", owasp: "A02:2021", model: "Groq Llama 3.3",
+      category: "Cryptography", cwe: "CWE-338", owasp: "A02:2021", model: "OpenRouter / Claude Haiku",
       summary: "Promotional coupon codes are generated with Math.random(), which is predictable. Low direct impact, but enables coupon farming.",
       code: `function generateCoupon() {
   return 'SAVE-' + Math.random()
@@ -617,14 +617,14 @@ const rateLimit = require('express-rate-limit');`,
     }),
     F({
       sev: "info", name: ".env.example contains a real-looking API key", file: ".env.example", start: 5, lines: [7, 7],
-      category: "Secrets & Credentials", cwe: "CWE-540", owasp: "—", model: "Groq Llama 3.3", confidence: "Medium",
-      summary: "The example env file ships a Groq key with a realistic prefix. If it is a real key it must be rotated; if not, use an obvious placeholder to avoid false alarms.",
+      category: "Secrets & Credentials", cwe: "CWE-540", owasp: "—", model: "OpenRouter / Claude Haiku", confidence: "Medium",
+      summary: "The example env file ships an OpenRouter key with a realistic prefix. If it is a real key it must be rotated; if not, use an obvious placeholder to avoid false alarms.",
       code: `DATABASE_URL=postgres://localhost/shop
 JWT_SECRET=change-me
-GROQ_API_KEY=gsk_x7PbqT2VfLm9aRw3KdYe`,
+OPENROUTER_API_KEY=sk-or-x7PbqT2VfLm9aRw3KdYe`,
       vuln: [2],
       fixSummary: "Use clearly fake placeholders.",
-      fixCode: `GROQ_API_KEY=your-groq-key-here`,
+      fixCode: `OPENROUTER_API_KEY=your-openrouter-key-here`,
       added: [0], effort: "~5 min"
     }),
     F({
@@ -669,7 +669,7 @@ for (const order of orders) {
     }),
     F({
       type: "opt", sev: "opt", name: "Missing index on orders.user_id", file: "src/models/order.js", start: 4, lines: [6, 10],
-      category: "Performance", model: "Groq Llama 3.3", impact: "High",
+      category: "Performance", model: "OpenRouter / Claude Haiku", impact: "High",
       summary: "Every per-user order query performs a sequential scan — the orders table has no index on user_id. At 1M+ rows this is the slowest query in the app.",
       code: `const Order = sequelize.define('Order', {
   userId: DataTypes.INTEGER,
@@ -715,7 +715,7 @@ router.get('/', async (req, res) => {
     }),
     F({
       type: "opt", sev: "opt", name: "Unbounded JSON body size", file: "src/index.js", start: 12, lines: [12, 12],
-      category: "Scalability", model: "Groq Mixtral 8x7B", impact: "Medium",
+      category: "Scalability", model: "Gemini 2.0 Flash", impact: "Medium",
       summary: "express.json() has no size limit (default 100kb was overridden to '50mb' for the import endpoint, globally). A single request can allocate 50 MB; a handful can OOM the process.",
       code: `app.use(express.json({ limit: '50mb' }));`,
       vuln: [0],
@@ -745,7 +745,7 @@ app.use('/import', express.json({ limit: '50mb' }));`,
     }),
     F({
       type: "opt", sev: "opt", name: "Duplicate validation logic across 6 routes", file: "src/utils/validator.js", start: 1, lines: [1, 1],
-      category: "Code Quality", model: "Groq Llama 3.3", impact: "Low",
+      category: "Code Quality", model: "OpenRouter / Claude Haiku", impact: "Low",
       summary: "Email/phone validation is re-implemented (with 3 different regexes) in auth.js, users.js, orders.js, and 3 more files. One of the regexes rejects valid + addresses.",
       code: `// validator.js exists but routes roll their own:
 // auth.js:    /^\\S+@\\S+$/
@@ -775,7 +775,7 @@ for (const s of stale) await s.destroy();`,
     }),
     F({
       type: "opt", sev: "opt", name: "lodash imported wholesale for one function", file: "src/utils/helpers.js", start: 1, lines: [1, 1],
-      category: "Dependencies", model: "Groq Mixtral 8x7B", impact: "Low",
+      category: "Dependencies", model: "Gemini 2.0 Flash", impact: "Low",
       summary: "`require('lodash')` pulls 72 KB for a single `pick` call. Cold-start time on the serverless deployment pays for it on every boot.",
       code: `const _ = require('lodash');`,
       vuln: [0],
@@ -802,7 +802,7 @@ for (const s of stale) await s.destroy();`,
     }),
     F({
       type: "opt", sev: "opt", name: "Images served uncompressed from origin", file: "src/index.js", start: 20, lines: [21, 21],
-      category: "Performance", model: "Groq Llama 3.3", impact: "Medium",
+      category: "Performance", model: "OpenRouter / Claude Haiku", impact: "Medium",
       summary: "Static product images are served by Express with no compression, caching headers, or CDN. 4.1 MB average page weight on the catalog.",
       code: `app.use('/static', express.static('public'));`,
       vuln: [0],
@@ -880,7 +880,7 @@ const reviews = await Review.byUser(id);`,
     }),
     S({
       sev: "high", stubCategory: "Placeholder", name: "Email service returns dummy success",
-      file: "src/services/emailService.js", start: 12, lines: [14, 16], model: "Groq Llama 3.3",
+      file: "src/services/emailService.js", start: 12, lines: [14, 16], model: "OpenRouter / Claude Haiku",
       risk: "No emails are ever sent — password resets and receipts silently fail while the code reports success.",
       summary: "The transactional email sender returns a hardcoded { ok: true } sample response instead of dispatching to a provider. The function name implies delivery but no provider is wired.",
       code: `async function sendEmail(to, template, vars) {

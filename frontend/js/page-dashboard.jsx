@@ -130,7 +130,7 @@
     const [done, setDone] = useState({ 1: false, 2: false, 3: false });
     const steps = [
       { n: 1, title: "Connect GitHub", desc: "Authorize Akira AI to read the repositories you want to scan.", cta: "Connect", icon: "github" },
-      { n: 2, title: "Add your free API keys", desc: "Bring keys for Gemini, Groq, or OpenRouter — all have generous free tiers.", cta: "Add keys", icon: "key" },
+      { n: 2, title: "Add your free API keys", desc: "Bring keys for Gemini or OpenRouter — both have generous free tiers.", cta: "Add keys", icon: "key" },
       { n: 3, title: "Run your first scan", desc: "Point Akira AI at a repo and watch both engines go to work.", cta: "New scan", icon: "shield" },
     ];
     const completedCount = Object.values(done).filter(Boolean).length;

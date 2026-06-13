@@ -41,7 +41,7 @@ _FINDINGS = [
      "The search endpoint interpolates the raw `q` query parameter directly into a SQL statement, allowing dumping of all tables without authentication.",
      "Use parameterized queries / query builder bindings so user input never enters the SQL grammar."),
     ("VLN-0002", ENGINE_SECURITY, "Data Exposure & Secrets", "Hardcoded API Keys", "critical",
-     "src/services/paymentService.js", 3, 3, "CWE-798", "A07:2021", "Groq Llama 3.3", True,
+     "src/services/paymentService.js", 3, 3, "CWE-798", "A07:2021", "OpenRouter / Claude Haiku", True,
      "A live Stripe secret key is committed in source. Anyone with repo access can issue refunds and exfiltrate payment data.",
      "Load the key from the environment and rotate the leaked key in the Stripe dashboard."),
     ("VLN-0003", ENGINE_SECURITY, "Authentication & Authorization", "JWT None Algorithm", "critical",
@@ -57,7 +57,7 @@ _FINDINGS = [
      "The `/admin/orders/export` route is mounted before the admin role check, so any authenticated user can download all orders.",
      "Apply the `requireAdmin` middleware before the export route."),
     ("VLN-0006", ENGINE_SECURITY, "Authentication & Authorization", "JWT Weak Secret", "high",
-     "src/routes/auth.js", 90, 91, "CWE-330", "A07:2021", "Groq Llama 3.3", False,
+     "src/routes/auth.js", 90, 91, "CWE-330", "A07:2021", "OpenRouter / Claude Haiku", False,
      "Password reset tokens are generated with `Math.random()`, making them predictable and brute-forceable.",
      "Use a cryptographically secure RNG (`crypto.randomBytes`) for reset tokens."),
     ("VLN-0007", ENGINE_SECURITY, "Authentication & Authorization", "Insecure Direct Object Reference (IDOR)", "high",
@@ -73,7 +73,7 @@ _FINDINGS = [
      "CORS reflects an arbitrary `Origin` with credentials enabled, defeating same-origin protections.",
      "Use a static allow-list of trusted origins and avoid reflecting the request origin."),
     ("VLN-0010", ENGINE_SECURITY, "Cryptography", "Weak Hashing", "high",
-     "src/utils/crypto.js", 7, 7, "CWE-916", "A02:2021", "Groq Llama 3.3", False,
+     "src/utils/crypto.js", 7, 7, "CWE-916", "A02:2021", "OpenRouter / Claude Haiku", False,
      "Passwords are hashed with bcrypt cost factor 4 — far too low to resist offline cracking.",
      "Raise the bcrypt cost factor to at least 12."),
     # A couple of mediums/lows for spread
@@ -82,7 +82,7 @@ _FINDINGS = [
      "Unhandled errors return full stack traces to clients in production, leaking internal structure.",
      "Return a generic error to clients and log details server-side."),
     ("VLN-0012", ENGINE_SECURITY, "API Security", "Missing Rate Limiting", "medium",
-     "src/routes/auth.js", 32, 32, "CWE-770", "A04:2021", "Groq Llama 3.3", False,
+     "src/routes/auth.js", 32, 32, "CWE-770", "A04:2021", "OpenRouter / Claude Haiku", False,
      "The login endpoint has no rate limiting, permitting credential stuffing at network speed.",
      "Apply the existing rate-limit middleware to authentication routes."),
     # Optimizations
@@ -91,7 +91,7 @@ _FINDINGS = [
      "The orders endpoint issues one query per line item; eager-loading with a JOIN would cut p95 latency ~60%.",
      "Eager-load line items with a single JOIN query."),
     ("OPT-0002", ENGINE_OPTIMIZATION, "Performance", "Missing Index", "medium",
-     "src/routes/products.js", 12, 16, None, None, "Groq Llama 3.3", False,
+     "src/routes/products.js", 12, 16, None, None, "OpenRouter / Claude Haiku", False,
      "Product listing filters on `category_id` with no index, forcing a full table scan.",
      "Add a database index on `products.category_id`."),
     ("OPT-0003", ENGINE_OPTIMIZATION, "Dependency Optimization", "Heavy Package", "low",
@@ -136,7 +136,7 @@ async def _get_or_create_user(db) -> User:
         email_verified=True,
         settings={"theme": "dark", "default_scan_mode": "Deep",
                   "model_settings": {"default_model": "Auto",
-                                     "fallback_order": ["gemini", "groq", "openrouter"],
+                                     "fallback_order": ["gemini", "openrouter"],
                                      "token_budgets": {}}},
         privacy={"improve_ai": True, "store_scan_history": True},
         notifications={"scan_complete": True, "critical_found": True,
@@ -154,7 +154,6 @@ async def _seed_keys(db, user: User) -> None:
     # placeholders so the seed still runs without them.
     demo_keys = {
         "gemini": settings.demo_gemini_key or "AIzaSyD-demo-gemini-key-redacted",
-        "groq": settings.demo_groq_key or "gsk_demo_groq_key_redacted",
         "openrouter": settings.demo_openrouter_key or "sk-or-demo-openrouter-key-redacted",
     }
     existing = {
@@ -188,7 +187,7 @@ async def _seed_scan(db, user: User) -> Scan | None:
     scan = Scan(
         user_id=user.id, source_type="github", repo="user/ecommerce-api",
         branch="main", commit="a3f9c21", depth="deep", model_mode="auto",
-        models=["gemini", "groq", "openrouter"], include_custom=True,
+        models=["gemini", "openrouter"], include_custom=True,
         include_optimization=True, status=SCAN_COMPLETED,
         files=24, segment_total=318, segments_analyzed=318,
         security_score=38, optimization_score=64, completeness_score=52,
@@ -213,7 +212,7 @@ async def _seed_scan(db, user: User) -> Scan | None:
             severity=sev, confidence="High" if verified else "Medium",
             file=file, line_start=ls, line_end=le, cwe_id=cwe, owasp_ref=owasp,
             explanation=summary, fix_summary=fix, model_attribution=model,
-            verified_by="Groq Llama 3.3" if verified else None,
+            verified_by="OpenRouter / Claude Haiku" if verified else None,
         ))
 
     # Stub engine demo findings.

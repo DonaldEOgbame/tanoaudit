@@ -81,7 +81,7 @@
               h(Icons[icon], { size: 14 }), label)))),
       h(SRow, { label: "Language" }, h(Dropdown, { width: 160, options: ["English", "Deutsch", "日本語"] })),
       h(SRow, { label: "Default scan depth" }, h(Dropdown, { width: 160, defaultValue: "Deep", options: ["Fast", "Deep", "Thorough"] })),
-      h(SRow, { label: "Default model" }, h(Dropdown, { width: 200, options: ["Auto (recommended)", "Gemini 2.0 Flash", "Groq Llama 3.3"] })),
+      h(SRow, { label: "Default model" }, h(Dropdown, { width: 200, options: ["Auto (recommended)", "Gemini 2.0 Flash", "OpenRouter / Claude Haiku"] })),
       h(SRow, { label: "Timezone" }, h(Dropdown, { width: 220, options: ["(GMT-8) Pacific Time", "(GMT+0) UTC", "(GMT+1) Berlin"] })),
       h(SRow, { label: "Date format" }, h(Dropdown, { width: 160, options: ["Jun 10, 2026", "10/06/2026", "2026-06-10"] })));
   }
@@ -284,7 +284,7 @@
     const [expanded, setExpanded] = useState(null);
     const explainers = [
       ["What we store", "Scan metadata, findings, and snippets of flagged code (max 40 lines per finding). We never store your full repository."],
-      ["Where code goes", "Code segments are sent to the model providers you configure (Gemini/Groq/OpenRouter) under your own API keys, then discarded."],
+      ["Where code goes", "Code segments are sent to the model providers you configure (Gemini/OpenRouter) under your own API keys, then discarded."],
       ["Retention", "Scan history is kept until you delete it. Deleted scans are purged from backups within 30 days."]];
     return h("div", null, h(H2, null, "Privacy & Data"),
       explainers.map(([title, body], i) =>
@@ -442,7 +442,6 @@
     const [results, setResults] = useState({});
     const keys = [
       { id: "gemini", name: "Gemini API key", value: "AIzaSyD-demo-key-redacted", status: "valid", verified: "2h ago" },
-      { id: "groq", name: "Groq API key", value: "gsk_demo_key_redacted", status: "valid", verified: "2h ago" },
       { id: "openrouter", name: "OpenRouter API key", value: "sk-or-demo-key-redacted", status: "expiring", verified: "6d ago" }];
     function testAll() {
       setTesting(true); setResults({});
@@ -477,9 +476,9 @@
   }
 
   function ModelsSec() {
-    const [order, setOrder] = useState(["Gemini 2.0 Flash", "Groq Llama 3.3", "OpenRouter / Claude Haiku"]);
+    const [order, setOrder] = useState(["Gemini 2.0 Flash", "OpenRouter / Claude Haiku"]);
     const [dragIdx, setDragIdx] = useState(null);
-    const budgets = { "Gemini 2.0 Flash": 60, "Groq Llama 3.3": 80, "OpenRouter / Claude Haiku": 40 };
+    const budgets = { "Gemini 2.0 Flash": 60, "OpenRouter / Claude Haiku": 40 };
     return h("div", null, h(H2, null, "Models"),
       h(SRow, { label: "Default model" }, h(Dropdown, { width: 200, options: ["Auto (recommended)"].concat(order) })),
       h("div", { style: { padding: "12px 14px", borderRadius: "var(--r-md)", background: "var(--bg-inset)", border: "1px solid var(--border)", margin: "14px 0", fontSize: 12.5, color: "var(--text-2)", display: "flex", gap: 8 } },
@@ -502,7 +501,6 @@
       h("div", { style: { fontSize: 13, fontWeight: 650, marginBottom: 8 } }, "Performance (last 30 days)"),
       h("div", { style: { border: "1px solid var(--border)", borderRadius: "var(--r-md)", overflow: "hidden" } },
         [["Gemini 2.0 Flash", "1,204 segments", "1.8% FP rate", "640ms avg"],
-         ["Groq Llama 3.3", "987 segments", "2.4% FP rate", "210ms avg"],
          ["OpenRouter / Claude Haiku", "411 segments", "1.2% FP rate", "890ms avg"]].map(([name, segs, fp, ms], i) =>
           h("div", { key: name, style: { display: "flex", gap: 10, padding: "9px 14px", borderTop: i ? "1px solid var(--border)" : "none", fontSize: 12.5 } },
             h("span", { style: { flex: 1, fontWeight: 550 } }, name),
@@ -518,13 +516,13 @@
           h("span", { style: { fontWeight: 550 } }, "Current session"), h("span", { style: { color: "var(--text-3)" } }, "64% of daily quota")),
         h(ProgressBar, { value: 64 })),
       h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 } },
-        [["Scans this month", "12"], ["Lifetime segments", "48,211"], ["API calls (Gemini)", "9,402"], ["API calls (Groq)", "7,156"]].map(([label, val]) =>
+        [["Scans this month", "12"], ["Lifetime segments", "48,211"], ["API calls (Gemini)", "9,402"], ["API calls (OpenRouter)", "7,156"]].map(([label, val]) =>
           h("div", { key: label, className: "card", style: { padding: "12px 16px" } },
             h("div", { style: { fontSize: 12, color: "var(--text-2)" } }, label),
             h("div", { style: { fontSize: 20, fontWeight: 700, marginTop: 2, fontVariantNumeric: "tabular-nums" } }, val)))),
       h("div", { style: { fontSize: 13, fontWeight: 650, marginBottom: 8 } }, "Daily tokens by model"),
       h("div", { style: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 } },
-        [["Gemini 2.0 Flash", 38, "#7aa2f7"], ["Groq Llama 3.3", 52, "#f59e0b"], ["OpenRouter", 14, "#c792ea"]].map(([name, pct, color]) =>
+        [["Gemini 2.0 Flash", 72, "#7aa2f7"], ["OpenRouter", 28, "#c792ea"]].map(([name, pct, color]) =>
           h("div", { key: name },
             h("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 } },
               h("span", null, name), h("span", { className: "mono", style: { color: "var(--text-3)" } }, pct + "k / 100k")),

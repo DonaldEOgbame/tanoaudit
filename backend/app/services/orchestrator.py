@@ -362,6 +362,9 @@ async def run_scan(
                 await db.commit()
         await ev.bus.publish(scan_id, ev.SCAN_CANCELLED)
     except Exception as exc:  # noqa: BLE001 — scan must always terminate
+        # Log the full traceback — otherwise a failed scan only stores str(exc),
+        # which is undebuggable (e.g. a bare "'NoneType' object has no attribute").
+        logger.exception("scan %s failed", scan_id)
         async with SessionLocal() as db:
             scan = await db.get(Scan, scan_id)
             if scan:

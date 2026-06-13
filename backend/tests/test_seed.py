@@ -47,7 +47,7 @@ async def test_seed_produces_complete_demo(client):
     # API keys are present and masked (never leak the raw value).
     r = await client.get(f"{PREFIX}/settings/api-keys", headers=headers)
     keys = r.json()["data"]
-    assert {k["provider"] for k in keys} == {"gemini", "groq", "openrouter"}
+    assert {k["provider"] for k in keys} == {"gemini", "openrouter"}
     assert all("redacted" not in k["masked"] for k in keys)
 
     # Optimization plan + watched repo.

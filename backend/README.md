@@ -134,7 +134,7 @@ rate limiting) and is currently unused.
 | GET/PUT | `/api/v1/settings/models` | Default model, fallback order, per-model budgets |
 | GET/PUT | `/api/v1/settings/privacy` | `improve_ai`, `store_scan_history` toggles |
 
-Providers: `gemini`, `groq`, `openrouter`, `github`. Keys are Fernet-encrypted;
+Providers: `gemini`, `openrouter`, `github`. Keys are Fernet-encrypted;
 reads expose only the last 4 chars and are never logged.
 
 ## Module 3 endpoints (Scan Pipeline Core)
@@ -165,7 +165,7 @@ timed-out/unparseable segments are skipped, not fatal.
 The orchestrator now builds a `ModelRouter` (`services/router_model.py`) per
 scan from the user's decrypted keys (`services/router_factory.py`):
 
-- **Real provider calls** (`services/llm_clients.py`) for Gemini, Groq,
+- **Real provider calls** (`services/llm_clients.py`) for Gemini and
   OpenRouter; failures are classified (`RateLimited` / `ProviderTimeout` /
   `ProviderError`).
 - **Auto mode:** try providers in order; on 429 cool the provider down for 60s,

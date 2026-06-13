@@ -30,8 +30,8 @@ Is this genuinely a CRITICAL-severity security vulnerability? Confirm only if th
 risk is real and high-impact."""
 
 
-def _parse_confirm(raw: str) -> bool | None:
-    raw = raw.strip()
+def _parse_confirm(raw: str | None) -> bool | None:
+    raw = (raw or "").strip()
     m = re.search(r"\{.*\}", raw, re.DOTALL)
     if not m:
         return None

@@ -93,7 +93,7 @@ async def test_usage_aggregate(auth):
     uid = await _uid(client, headers)
     await record_usage(uid, "gemini", "gemini-2.0-flash", 100, 50, purpose="scan")
     await record_usage(uid, "gemini", "gemini-2.0-flash", 80, 40, purpose="chat")
-    await record_usage(uid, "groq", "llama-3.3", 60, 30, purpose="scan")
+    await record_usage(uid, "openrouter", "claude-3.5-haiku", 60, 30, purpose="scan")
 
     # A completed scan for this month + lifetime segments.
     async with SessionLocal() as db:
@@ -104,7 +104,7 @@ async def test_usage_aggregate(auth):
     r = await client.get(f"{PREFIX}/usage", headers=headers)
     data = r.json()["data"]
     calls = {c["provider"]: c["calls"] for c in data["api_calls_by_provider"]}
-    assert calls["gemini"] == 2 and calls["groq"] == 1
+    assert calls["gemini"] == 2 and calls["openrouter"] == 1
     assert data["scans_this_month"] == 1
     assert data["lifetime_segments"] == 12
     assert data["session"]["tokens"] == 100 + 50 + 80 + 40 + 60 + 30

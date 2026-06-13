@@ -160,8 +160,8 @@ LINES {segment.line_start}-{segment.line_end}:
 
 
 # ---- Parsing ----------------------------------------------------------------
-def _extract_json(text: str) -> dict | None:
-    text = text.strip()
+def _extract_json(text: str | None) -> dict | None:
+    text = (text or "").strip()
     # Strip ``` fences if present.
     fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
     if fenced:

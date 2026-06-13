@@ -14,7 +14,7 @@ environmental (needs an account/key) or a deliberate, low-risk choice.
 
 - 🟢 **Provider keys, GitHub OAuth, search, email are all opt-in.** The app runs
   fully without them (deterministic fallbacks). To enable the real thing, set:
-  - `GEMINI`/`GROQ`/`OPENROUTER` keys (per-user, via Settings) — real scans/chat/fixes.
+  - `GEMINI`/`OPENROUTER` keys (per-user, via Settings) — real scans/chat/fixes.
   - `GITHUB_CLIENT_ID`/`SECRET` — OAuth; without them `/github/authorize` 503s.
   - `TAVILY_KEY` (or `SERPAPI_KEY`) — live custom-vuln web research.
   - `MAILERSEND_API_KEY` or `SMTP_*` — real email; else logged to an outbox.

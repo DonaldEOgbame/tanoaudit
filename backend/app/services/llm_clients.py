@@ -1,4 +1,4 @@
-"""Chat-completion clients for Gemini, Groq, and OpenRouter.
+"""Chat-completion clients for Gemini and OpenRouter.
 
 Each `complete_*` makes one text-in/text-out call and raises a typed error on
 failure so the router can react (cool down on rate limits, mark unanalyzed on
@@ -43,14 +43,12 @@ class Completion:
 # Default model id per provider (env-overridable via GEMINI_MODEL etc.).
 DEFAULT_MODELS = {
     "gemini": settings.gemini_model,
-    "groq": settings.groq_model,
     "openrouter": settings.openrouter_model,
 }
 
 # Friendly label used for finding attribution / UI.
 PROVIDER_LABELS = {
     "gemini": "Gemini 2.0 Flash",
-    "groq": "Groq Llama 3.3",
     "openrouter": "OpenRouter / Claude Haiku",
 }
 
@@ -91,6 +89,7 @@ async def complete_gemini(key: str, prompt: str, model: str | None = None) -> Co
         text = data["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError):
         text = ""
+    text = text or ""  # a null content field deserializes to None
     usage = data.get("usageMetadata", {})
     return Completion(
         text=text, provider="gemini", model=model,
@@ -106,10 +105,16 @@ async def _openai_style(
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     if extra_headers:
         headers.update(extra_headers)
+    # These completers serve analysis, which must return parseable JSON. Force
+    # JSON object mode + a token cap so larger segments aren't fenced/truncated
+    # (same fix as the Gemini completer; the chat/fix streamer is separate and
+    # stays free-text). OpenAI-compatible APIs (OpenRouter) honor this.
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "max_tokens": MAX_ANALYSIS_TOKENS,
     }
     try:
         async with httpx.AsyncClient(timeout=_timeout()) as c:
@@ -129,18 +134,12 @@ async def _openai_style(
         text = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError):
         text = ""
+    text = text or ""  # a null content field deserializes to None
     usage = data.get("usage", {})
     return Completion(
         text=text, provider=provider, model=model,
         tokens_in=usage.get("prompt_tokens", 0),
         tokens_out=usage.get("completion_tokens", 0),
-    )
-
-
-async def complete_groq(key: str, prompt: str, model: str | None = None) -> Completion:
-    return await _openai_style(
-        "groq", "https://api.groq.com/openai/v1", key, prompt,
-        model or DEFAULT_MODELS["groq"],
     )
 
 
@@ -154,7 +153,6 @@ async def complete_openrouter(key: str, prompt: str, model: str | None = None) -
 
 COMPLETERS = {
     "gemini": complete_gemini,
-    "groq": complete_groq,
     "openrouter": complete_openrouter,
 }
 
@@ -225,13 +223,6 @@ async def _stream_openai_style(provider, base_url, key, prompt, model, extra_hea
         raise ProviderError(f"{provider} network error: {type(e).__name__}") from e
 
 
-async def stream_groq(key: str, prompt: str, model: str | None = None):
-    async for d in _stream_openai_style(
-        "groq", "https://api.groq.com/openai/v1", key, prompt, model or DEFAULT_MODELS["groq"]
-    ):
-        yield d
-
-
 async def stream_openrouter(key: str, prompt: str, model: str | None = None):
     async for d in _stream_openai_style(
         "openrouter", "https://openrouter.ai/api/v1", key, prompt,
@@ -243,6 +234,5 @@ async def stream_openrouter(key: str, prompt: str, model: str | None = None):
 
 STREAMERS = {
     "gemini": stream_gemini,
-    "groq": stream_groq,
     "openrouter": stream_openrouter,
 }

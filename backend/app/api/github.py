@@ -400,7 +400,7 @@ async def receive_webhook(
         scan = Scan(
             user_id=user_id, source_type="github", repo=repo_name, branch=branch,
             depth="deep", model_mode="auto",
-            models=["gemini", "groq", "openrouter"],
+            models=["gemini", "openrouter"],
             include_custom=True, include_optimization=True,
             path_filters=path_filters,
         )

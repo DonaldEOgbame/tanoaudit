@@ -15,7 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
 # Recognised providers. GitHub uses the same store for its OAuth/personal token.
-PROVIDERS = ("gemini", "groq", "openrouter", "github")
+PROVIDERS = ("gemini", "openrouter", "github")
 
 # Validity statuses surfaced to the UI.
 STATUS_UNVERIFIED = "unverified"

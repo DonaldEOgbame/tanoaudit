@@ -9,8 +9,8 @@ from app.models.api_key import ApiKey
 from app.models.scan import Scan
 from app.services.router_model import ModelRouter
 
-_LLM_PROVIDERS = ("gemini", "groq", "openrouter")
-_DEFAULT_ORDER = ["gemini", "groq", "openrouter"]
+_LLM_PROVIDERS = ("gemini", "openrouter")
+_DEFAULT_ORDER = ["gemini", "openrouter"]
 
 
 async def build_router_for_scan(scan: Scan) -> ModelRouter:

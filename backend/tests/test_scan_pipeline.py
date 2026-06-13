@@ -301,6 +301,43 @@ async def test_gemini_completer_requests_json_mode():
     assert gc.get("maxOutputTokens") == llm_clients.MAX_ANALYSIS_TOKENS
 
 
+async def test_completers_coerce_null_content():
+    """A provider 200 with a null content field must yield "" not None, or
+    downstream .strip() crashes the whole scan (real bug from a live run)."""
+    import httpx
+    from app.services import llm_clients
+
+    def gemini_null(request):
+        return httpx.Response(200, json={
+            "candidates": [{"content": {"parts": [{"text": None}]}}],
+            "usageMetadata": {},
+        })
+
+    def openai_null(request):
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": None}}], "usage": {},
+        })
+
+    orig = httpx.AsyncClient
+    for handler, call in (
+        (gemini_null, lambda: llm_clients.complete_gemini("k", "p")),
+        (openai_null, lambda: llm_clients.complete_openrouter("k", "p")),
+    ):
+        transport = httpx.MockTransport(handler)
+        httpx.AsyncClient = lambda *a, _t=transport, **k: orig(*a, transport=_t, **k)
+        try:
+            comp = await call()
+            assert comp.text == ""  # not None
+        finally:
+            httpx.AsyncClient = orig
+
+    # And the analysis/verification parsers tolerate None defensively.
+    from app.services.analysis import parse_analysis
+    from app.services.verification import _parse_confirm
+    assert parse_analysis(None) is None
+    assert _parse_confirm(None) is None
+
+
 async def test_create_scan_validation(auth):
     client, headers, _ = auth
     # url type without source_url -> 400

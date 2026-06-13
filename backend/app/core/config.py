@@ -77,8 +77,8 @@ class Settings(BaseSettings):
     # `gemini-flash-latest` works on the free tier; `gemini-2.0-flash` has had
     # free-tier quota zeroed (limit: 0) — override via GEMINI_MODEL as needed.
     gemini_model: str = "gemini-flash-latest"
-    groq_model: str = "llama-3.3-70b-versatile"
     openrouter_model: str = "anthropic/claude-3.5-haiku"
+    # (Groq removed — no longer offered.)
 
     # GitHub OAuth app (Module 11). Without these, OAuth endpoints return a clear
     # "not configured" error; the rest of the app runs fine.
@@ -88,7 +88,6 @@ class Settings(BaseSettings):
 
     # Demo provider keys consumed by `python -m app.seed` (stored per-user).
     demo_gemini_key: str | None = None
-    demo_groq_key: str | None = None
     demo_openrouter_key: str | None = None
 
     # Optional web-search provider(s) for custom-vuln research.

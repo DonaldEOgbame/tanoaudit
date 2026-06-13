@@ -2,6 +2,11 @@
 __pycache__/
 *.pyc
 .env
+.env.bak.*
 *.db
+*.db-journal
 .pytest_cache/
 exports/
+# Runtime scan artifacts (source caches + extracted ZIP uploads).
+scan_cache/
+scan_uploads/

@@ -55,12 +55,12 @@
     "Building dependency graph (47 packages)…",
     "Parsing {file} — {n} segments created",
     "Dispatching segment batch to Gemini 2.0 Flash",
-    "Dispatching segment batch to Groq Llama 3.3",
+    "Dispatching segment batch to OpenRouter / Claude Haiku",
     "Cross-verifying critical finding across 2 models",
     "OWASP A03:2021 pattern matched in {file}",
     "Optimization engine: analyzing query patterns in {file}",
     "Rate limit warning from Gemini — throttling to 60 rpm",
-    "Rerouting 23 segments to Groq (failover)",
+    "Rerouting 23 segments to OpenRouter (failover)",
     "AI-generation heuristic flagged {file} (confidence 0.81)",
     "Computing severity rollup for src/routes/",
     "Resolving CWE mappings for 43 findings",
@@ -391,7 +391,7 @@
   // Activity feed
   window.VS_ACTIVITY = [
     { who: "You", action: "ran a Deep scan on", target: "user/ecommerce-api", when: "just now", icon: "scan" },
-    { who: "System", action: "rerouted 23 segments to Groq after a rate limit on", target: "ecommerce-api", when: "1h ago", icon: "reroute" },
+    { who: "System", action: "rerouted 23 segments to OpenRouter after a rate limit on", target: "ecommerce-api", when: "1h ago", icon: "reroute" },
     { who: "You", action: "completed the goal ‘Verify JWT signatures’ in", target: "Auth Hardening", when: "yesterday", icon: "check" },
     { who: "Watchlist", action: "detected 3 new findings in", target: "ecommerce-api", when: "yesterday", icon: "bell" },
   ];
@@ -427,7 +427,6 @@
   // Per-model activity for live scan
   window.VS_MODELS = [
     { id: "gemini", name: "Gemini 2.0 Flash", short: "Gemini", color: "#7aa2f7", provider: "Google" },
-    { id: "groq", name: "Groq Llama 3.3", short: "Groq", color: "#f59e0b", provider: "Groq" },
     { id: "openrouter", name: "OpenRouter / Claude Haiku", short: "OpenRouter", color: "#c792ea", provider: "OpenRouter" },
   ];
 
@@ -472,7 +471,7 @@
 
   window.VS_REPO_META = {
     repo: "user/ecommerce-api", files: 24, segments: 318, duration: "12m 04s",
-    models: ["Gemini 2.0 Flash", "Groq Llama 3.3", "OpenRouter / Claude Haiku"],
+    models: ["Gemini 2.0 Flash", "OpenRouter / Claude Haiku"],
     score: 38, optScore: 64, stubScore: 52, branch: "main", commit: "a3f9c21",
   };
 })();
