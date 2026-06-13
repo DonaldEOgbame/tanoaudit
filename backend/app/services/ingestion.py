@@ -115,8 +115,15 @@ def extract_zip(data: bytes, dest: str) -> None:
             out.write(src.read())
 
 
+CLONE_TIMEOUT_S = 120
+
+
 async def clone_repo(url: str, dest: str, branch: str | None = None) -> None:
-    """Shallow-clone a public git URL into `dest`."""
+    """Shallow-clone a git URL into `dest`, with a hard timeout.
+
+    Without the timeout a network stall (unreachable host, hung transfer) would
+    block the scan — and the worker — forever.
+    """
     args = ["git", "clone", "--depth", "1"]
     if branch:
         args += ["--branch", branch]
@@ -126,7 +133,12 @@ async def clone_repo(url: str, dest: str, branch: str | None = None) -> None:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    _, stderr = await proc.communicate()
+    try:
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=CLONE_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise bad_request(f"Repository clone timed out after {CLONE_TIMEOUT_S}s")
     if proc.returncode != 0:
         raise bad_request(f"Could not clone repository: {stderr.decode()[:200]}")
 
