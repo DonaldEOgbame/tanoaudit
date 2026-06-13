@@ -49,7 +49,26 @@
 
   function Sidebar({ page, nav, collapsed, setCollapsed, onNewScan, onCmd, openSettings, demoState, user, onLogout }) {
     const [profileOpen, setProfileOpen] = useState(false);
-    const scans = window.VS_SCANS;
+    // Recent scans from the backend (falls back to demo data if the call fails).
+    const [scans, setScans] = useState([]);
+    useEffect(() => {
+      let alive = true;
+      if (!window.AkiraAPI) { setScans(window.VS_SCANS || []); return; }
+      window.AkiraAPI.scans.list({ limit: 8 })
+        .then((res) => {
+          if (!alive) return;
+          const items = (res && res.items) || [];
+          setScans(items.map((s) => ({
+            id: s.id,
+            repo: s.repo || s.source_url || "scan",
+            sev: (s.worst_severity && s.worst_severity !== "clean") ? s.worst_severity : "info",
+            issues: s.status === "completed" ? "" : (s.status || ""),
+          })));
+        })
+        .catch(() => { if (alive) setScans([]); });
+      return () => { alive = false; };
+    }, []);
+    const hasScans = scans.length > 0;
 
     return h("aside", { className: "vs-sidebar" + (collapsed ? " collapsed" : "") },
       // Head
@@ -97,16 +116,16 @@
         // Scans section with recent items
         !collapsed && h("div", { className: "sb-section-label", style: { marginTop: 8 } }, "Scans"),
         collapsed && h("button", { className: "sb-item" + (page === "scans" ? " active" : ""), onClick: () => nav("scans"), "data-tip": "Scans" }, h(Icons.list, { size: 17 })),
-        !collapsed && demoState !== "first-run" && h("div", { style: { marginBottom: 4 } },
+        !collapsed && hasScans && h("div", { style: { marginBottom: 4 } },
           scans.slice(0, 5).map((s) =>
-            h("button", { key: s.id, className: "sb-item" + (page === "report" && s.active ? " active" : ""),
-              onClick: () => nav(s.active ? "report" : "report"),
+            h("button", { key: s.id, className: "sb-item",
+              onClick: () => nav("report", s.id),
               style: { paddingLeft: 10 } },
               h(SevDot, { sev: s.sev }),
-              h("span", { className: "sbi-label", style: { fontSize: 12.5 } }, s.repo.split("/")[1]),
+              h("span", { className: "sbi-label", style: { fontSize: 12.5 } }, (s.repo.includes("/") ? s.repo.split("/")[1] : s.repo)),
               h("span", { style: { fontSize: 11, color: "var(--text-3)", fontVariantNumeric: "tabular-nums" } }, s.issues),
             ))),
-        !collapsed && demoState === "first-run" && h("div", { style: { padding: "4px 10px 8px", fontSize: 12, color: "var(--text-3)" } }, "No scans yet"),
+        !collapsed && !hasScans && h("div", { style: { padding: "4px 10px 8px", fontSize: 12, color: "var(--text-3)" } }, "No scans yet"),
       ),
 
       // Footer profile
@@ -158,11 +177,22 @@
   function CommandPalette({ onClose, nav, onNewScan, openSettings }) {
     const [q, setQ] = useState("");
     const [sel, setSel] = useState(0);
+    const [scanCmds, setScanCmds] = useState([]);
     const inputRef = useRef();
     useEffect(() => { inputRef.current && inputRef.current.focus(); }, []);
+    // Real scans become "jump to report" commands.
+    useEffect(() => {
+      if (!window.AkiraAPI) return;
+      window.AkiraAPI.scans.list({ limit: 20 })
+        .then((res) => setScanCmds(((res && res.items) || []).map((s) => ({
+          type: "Scan", label: s.repo || s.source_url || "scan",
+          hint: s.status === "completed" ? "score " + (s.security_score != null ? s.security_score : "—") : (s.status || ""),
+          icon: "list", action: () => nav("report", s.id),
+        }))))
+        .catch(() => {});
+    }, []);
 
-    const commands = [];
-    window.VS_SCANS.forEach((s) => commands.push({ type: "Scan", label: s.repo, hint: s.issues + " findings", icon: "list", action: () => nav(s.active ? "report" : "report") }));
+    const commands = [...scanCmds];
     [["Dashboard", "home", "dashboard"], ["Watchlist", "bookmark", "watchlist"], ["Reports", "report", "reports"],
      ["Custom Vulnerabilities", "bug", "custom"], ["Optimization Plans", "sliders", "plans"], ["Integrations", "github", "integrations"],
      ["Learning Hub", "book", "learning"]].forEach(([label, icon, page]) =>
@@ -170,8 +200,6 @@
     commands.push({ type: "Action", label: "Start a New Scan", icon: "plus", action: onNewScan });
     commands.push({ type: "Action", label: "Open Settings", icon: "settings", action: () => openSettings("general") });
     commands.push({ type: "Action", label: "API Keys", icon: "key", action: () => openSettings("apikeys") });
-    window.VS_FINDINGS.slice(0, 12).forEach((f) => commands.push({ type: "Finding", label: f.name, hint: f.file, icon: "bug", action: () => nav("report") }));
-    window.VS_REPO_FILES.forEach((f) => commands.push({ type: "File", label: f.path, icon: "file", action: () => nav("report") }));
 
     const filtered = q.trim() === "" ? commands.slice(0, 8) :
       commands.filter((c) => c.label.toLowerCase().includes(q.toLowerCase()) || (c.hint || "").toLowerCase().includes(q.toLowerCase())).slice(0, 30);

@@ -26,6 +26,7 @@ class ScanOut(BaseModel):
     source_type: str
     repo: Optional[str] = None
     source_url: Optional[str] = None
+    repository_id: Optional[str] = None
     branch: Optional[str] = None
     commit: Optional[str] = None
     depth: str

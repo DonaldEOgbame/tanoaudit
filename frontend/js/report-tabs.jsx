@@ -9,25 +9,35 @@
   const FILES = window.VS_REPO_FILES;
   const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3, info: 4, opt: 5 };
 
+  // Honest banner for tabs whose backend endpoint doesn't exist yet (these still
+  // render demo data so the UI is complete; see WIRING.md → Gaps).
+  function DemoBanner({ what }) {
+    return h("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", margin: "0 0 14px", borderRadius: "var(--r-md)", background: "var(--bg-inset)", border: "1px dashed var(--border-strong)", fontSize: 12, color: "var(--text-3)" } },
+      h(Icons.alert, { size: 14, style: { flexShrink: 0 } }),
+      h("span", null, what + " uses sample data — no backend endpoint yet."));
+  }
+  window.ReportDemoBanner = DemoBanner;
+
   // ============ FILE HEATMAP ============
-  function HeatmapTab({ onFileClick }) {
+  function HeatmapTab({ onFileClick, findings }) {
+    const ALL = findings || window.VS_FINDINGS || [];
     const [collapsed, setCollapsed] = useState({});
     const SEV_COLS = ["critical", "high", "medium", "low", "info", "opt"];
     const heat = useMemo(() => {
       const folderOf = (p) => {
-        if (!p.includes("/")) return "root";
+        if (!p || !p.includes("/")) return "root";
         const parts = p.split("/");
         return parts[0] === "src" ? (parts.length > 2 ? parts[1] : "src") : parts[0];
       };
       const map = {};
-      window.VS_FINDINGS.forEach((f) => {
+      ALL.forEach((f) => {
         const fo = folderOf(f.file);
         if (!map[fo]) map[fo] = { critical: 0, high: 0, medium: 0, low: 0, info: 0, opt: 0 };
-        map[fo][f.sev]++;
+        if (map[fo][f.sev] != null) map[fo][f.sev]++;
       });
-      const order = ["routes", "middleware", "services", "utils", "models", "config", "jobs", "src", "root"].filter((k) => map[k]);
+      const order = Object.keys(map);
       return { rows: order, values: order.map((r) => SEV_COLS.map((s) => map[r][s])) };
-    }, []);
+    }, [ALL]);
     // build folder tree
     const tree = useMemo(() => {
       const root = { name: "ecommerce-api", children: {}, files: [] };
@@ -115,7 +125,7 @@
     const oCount = deps.filter((d) => d.status === "Outdated").length;
     const cCount = deps.filter((d) => d.status === "Clean").length;
     return h("div", { style: { height: "100%", overflowY: "auto", padding: "20px 24px 60px" } },
-
+      h(DemoBanner, { what: "Dependency analysis" }),
       h("div", { className: "card", style: { overflow: "hidden" } },
         h("div", { style: { padding: "14px 20px", borderBottom: "1px solid var(--border)" } },
           h("h3", { style: { fontSize: 14, fontWeight: 650 } }, "Package inventory"),
@@ -155,6 +165,7 @@
   function AiGenTab() {
     const A = window.VS_AIGEN;
     return h("div", { style: { height: "100%", overflowY: "auto", padding: "20px 24px 60px" } },
+      h(DemoBanner, { what: "AI-generation analysis" }),
       h("div", { style: { display: "grid", gridTemplateColumns: "320px 1fr", gap: 18, alignItems: "start" } },
         // LEFT: ring + headline
         h("div", { className: "card", style: { padding: "24px 22px", textAlign: "center", position: "relative", overflow: "hidden" } },
@@ -189,7 +200,7 @@
   window.AiGenTab = AiGenTab;
 
   // ============ HISTORY ============
-  function HistoryTab({ justScanned }) {
+  function HistoryTab({ justScanned, meta }) {
     const H = window.VS_HISTORY;
     const cols = [
       { id: "new", label: "What's new", items: H.diffNew, color: "var(--sev-critical)", icon: "arrowUp" },
@@ -199,6 +210,7 @@
     const trend = H.trend;
 
     return h("div", { style: { height: "100%", overflowY: "auto", padding: "18px 24px 60px" } },
+      h(DemoBanner, { what: "Scan history & diff" }),
       justScanned && h("div", { className: "card", style: { padding: "11px 16px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10, background: "var(--accent-soft)", border: "1px solid var(--accent)" } },
         h(Icons.sparkle, { size: 16, style: { color: "var(--accent)" } }),
         h("span", { style: { fontSize: 13 } }, h("strong", null, "Scan complete."), " Here's what changed since your last scan of this repo.")),

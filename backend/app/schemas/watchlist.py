@@ -30,6 +30,7 @@ class WatchlistItem(BaseModel):
     new_criticals: int
     freq: str
     last: Optional[datetime] = None
+    last_scan_id: Optional[str] = None
 
 
 class WatchRequest(BaseModel):

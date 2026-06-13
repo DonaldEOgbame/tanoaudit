@@ -6,18 +6,122 @@
   const Icons = window.Icons;
   const { CountUp, ScoreGauge, SevBadge, SevDot, Tag, CodeBlock, Tabs, Avatar, scoreColor, Switch } = window;
 
-  const META = window.VS_REPO_META;
-  const ALL = window.VS_FINDINGS;
+  const API = window.AkiraAPI;
   const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3, info: 4, opt: 5 };
 
-  function ScanReport({ nav, toast, justScanned }) {
+  // Map a backend FindingOut into the shape this report UI renders (the old demo
+  // shape). engine security|optimization|stub -> type; severity -> sev (opt rows
+  // use sev "opt"). Exposed so report-tabs.jsx / chat.jsx reuse it.
+  function normalizeFinding(f) {
+    const type = f.engine === "optimization" ? "opt" : f.engine === "stub" ? "stub" : "vuln";
+    const sev = type === "opt" ? "opt" : (f.severity || "info").toLowerCase();
+    return {
+      id: f.id,
+      type,
+      sev,
+      name: f.subcategory || f.category || (f.stub_category) || "Finding",
+      category: f.category || "",
+      file: f.file,
+      start: f.line_start,
+      lines: (f.line_start && f.line_end) ? (f.line_end - f.line_start + 1) : 1,
+      code: f.code_snippet || "",
+      summary: f.explanation || "",
+      fixSummary: f.fix_summary || "",
+      fixCode: f.fix_snippet || "",
+      impact: f.impact || f.risk_if_shipped || "",
+      risk: f.risk_if_shipped || "",
+      cwe: f.cwe_id || "",
+      owasp: f.owasp_ref || "",
+      confidence: f.confidence || "",
+      model: f.model_attribution || "",
+      verified: !!f.verified_by,
+      stubCategory: f.stub_category || "",
+      effort: "",
+      added: f.fixed_at || "",
+      vuln: "",
+      current: f.code_snippet || "",
+      status: f.status,
+      _raw: f,
+    };
+  }
+  window.normalizeFinding = normalizeFinding;
+
+  // Build the META object (repo header + scores) from a backend ScanOut.
+  function metaFromScan(s) {
+    return {
+      id: s.id,
+      repo: s.repo || s.source_url || "scan",
+      repository_id: s.repository_id || null,
+      branch: s.branch || "default",
+      commit: (s.commit || "").slice(0, 7) || "—",
+      files: s.files || 0,
+      segments: s.segment_total || 0,
+      duration: "",
+      score: s.security_score != null ? s.security_score : 0,
+      optScore: s.optimization_score != null ? s.optimization_score : 0,
+      stubScore: s.completeness_score != null ? s.completeness_score : 0,
+      worst: s.worst_severity || "info",
+      summary: s.executive_summary || "",
+      status: s.status,
+    };
+  }
+  window.metaFromScan = metaFromScan;
+
+  // Mark a finding as a false positive: optimistic suppress + persist to the
+  // backend when it's a real finding (has _raw); demo findings just suppress.
+  function markFalsePositive(f, setSuppressed, toast) {
+    setSuppressed((s) => Object.assign({}, s, { [f.id]: true }));
+    toast({ kind: "info", msg: "Marked as false positive: " + f.name });
+    if (f._raw && f._raw.id && API) {
+      API.findings.markFalsePositive(f._raw.id, "Marked from report").catch((e) => {
+        // Revert on failure.
+        setSuppressed((s) => { const n = Object.assign({}, s); delete n[f.id]; return n; });
+        toast({ kind: "error", msg: "Couldn't mark false positive: " + ((e && e.message) || "error") });
+      });
+    }
+  }
+
+  function ScanReport({ nav, toast, justScanned, scanId, repo }) {
     const [tab, setTab] = useState("overview");
-    const [selFile, setSelFile] = useState("src/routes/products.js");
+    const [selFile, setSelFile] = useState(null);
     const [suppressed, setSuppressed] = useState({});
     const [shareOpen, setShareOpen] = useState(false);
     const [exportOpen, setExportOpen] = useState(false);
     const [handoffOpen, setHandoffOpen] = useState(false);
     const [watched, setWatched] = useState(false);
+
+    // Load the real scan + findings. Falls back to demo globals when no scanId
+    // (e.g. the dashboard "view sample" path) so the showcase still renders.
+    const [state, setState] = useState({ loading: !!scanId, error: null, meta: null, findings: null });
+    useEffect(() => {
+      if (!scanId) {
+        setState({ loading: false, error: null, meta: window.VS_REPO_META, findings: window.VS_FINDINGS });
+        return;
+      }
+      let alive = true;
+      setState({ loading: true, error: null, meta: null, findings: null });
+      Promise.all([
+        API.scans.get(scanId),
+        API.scans.findings(scanId),
+        API.watchlist.list().catch(() => [])
+      ])
+        .then(([scan, finds, wList]) => {
+          if (!alive) return;
+          const meta = metaFromScan(scan);
+          const isWatched = meta.repository_id ? (wList || []).some((w) => w.id === meta.repository_id) : false;
+          setWatched(isWatched);
+          setState({
+            loading: false, error: null,
+            meta,
+            findings: (finds || []).map(normalizeFinding),
+          });
+        })
+        .catch((e) => { if (alive) setState({ loading: false, error: (e && e.message) || "Failed to load scan", meta: null, findings: null }); });
+      return () => { alive = false; };
+    }, [scanId]);
+
+    const META = state.meta || { repo: repo || "scan", branch: "", commit: "", files: 0, segments: 0, duration: "", score: 0, optScore: 0, stubScore: 0 };
+    const ALL = state.findings || [];
 
     const counts = useMemo(() => {
       const c = { critical: 0, high: 0, medium: 0, low: 0, info: 0, opt: 0, stub: 0 };
@@ -28,8 +132,74 @@
         else c[f.sev]++;
       });
       return c;
-    }, [suppressed]);
+    }, [suppressed, ALL]);
     const totalSec = counts.critical + counts.high + counts.medium + counts.low + counts.info;
+
+    if (state.loading) {
+      return h("div", { style: { height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-3)", fontSize: 13 } }, "Loading scan…");
+    }
+    if (state.error) {
+      return h("div", { style: { height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, color: "var(--text-2)" } },
+        h("div", { style: { fontSize: 14 } }, "Couldn't load this scan"),
+        h("div", { style: { fontSize: 12.5, color: "var(--text-3)" } }, state.error),
+        h("button", { className: "btn btn-secondary btn-sm", onClick: () => nav("dashboard") }, "Back to dashboard"));
+    }
+
+    // Export: create on the backend, poll until ready, then open the file.
+    async function doExport(fmt, label) {
+      if (!scanId) { toast({ kind: "info", msg: label + " export (demo)" }); return; }
+      toast({ kind: "info", msg: label + " export started…" });
+      try {
+        const created = await API.reports.createExport(scanId, fmt);
+        let report = created;
+        for (let i = 0; i < 20 && report && report.status && report.status !== "ready" && report.status !== "failed"; i++) {
+          await new Promise((r) => setTimeout(r, 800));
+          const list = await API.reports.listExports(scanId);
+          report = (list || []).find((x) => x.id === created.id) || report;
+        }
+        if (report && (report.status === "ready" || !report.status)) {
+          window.open(API.reports.downloadExportUrl(report.id), "_blank");
+          toast({ kind: "success", msg: label + " ready" });
+        } else {
+          toast({ kind: "error", msg: "Export failed" });
+        }
+      } catch (e) {
+        toast({ kind: "error", msg: "Export failed: " + ((e && e.message) || "error") });
+      }
+    }
+
+    // Watch / re-scan via the watchlist + scans endpoints (needs a repository).
+    async function toggleWatch() {
+      const repoId = META.repository_id;
+      if (!repoId) {
+        toast({ kind: "error", msg: "Cannot watch this repository (no linked repository)" });
+        return;
+      }
+      const next = !watched;
+      setWatched(next);
+      try {
+        if (next) {
+          await API.watchlist.pin(repoId);
+          toast({ kind: "success", msg: "Watching " + META.repo });
+        } else {
+          await API.watchlist.unpin(repoId);
+          toast({ kind: "info", msg: "Removed " + META.repo + " from watchlist" });
+        }
+      } catch (e) {
+        setWatched(!next);
+        toast({ kind: "error", msg: "Couldn't update watchlist: " + ((e && e.message) || "error") });
+      }
+    }
+    async function doRescan() {
+      if (!scanId) { toast({ kind: "info", msg: "Re-scan queued (demo)" }); return; }
+      try {
+        const cfg = { source_type: state.meta && state.meta._raw ? state.meta._raw.source_type : "github", repo: META.repo };
+        await API.scans.create(cfg);
+        toast({ kind: "success", msg: "Re-scan queued for " + META.repo });
+      } catch (e) {
+        toast({ kind: "error", msg: "Couldn't queue re-scan: " + ((e && e.message) || "error") });
+      }
+    }
 
     const tabs = [
       { id: "overview", label: "Overview" },
@@ -57,66 +227,106 @@
           h("div", { style: { display: "flex", gap: 8, position: "relative" } },
             h("button", { className: "btn btn-sm" + (watched ? " btn-primary" : " btn-secondary"),
               title: watched ? "Watching this repo — monitored for new findings" : "Watch this repo for new findings",
-              onClick: () => { setWatched((v) => !v); toast({ kind: watched ? "info" : "success", msg: watched ? "Removed " + META.repo + " from watchlist" : "Watching " + META.repo + " · re-scan frequency: Manual (change it on the Watchlist)" }); } },
+              onClick: toggleWatch },
               h(Icons[watched ? "eye" : "eyeOff"], { size: 14 }), watched ? "Watching" : "Watch"),
-            h("button", { className: "btn btn-secondary btn-sm", onClick: () => { toast({ kind: "info", msg: "Re-scan queued for " + META.repo }); } }, h(Icons.refresh, { size: 14 }), "Re-scan"),
+            h("button", { className: "btn btn-secondary btn-sm", onClick: doRescan }, h(Icons.refresh, { size: 14 }), "Re-scan"),
             h("div", { style: { position: "relative" } },
               h("button", { className: "btn btn-secondary btn-sm", onClick: () => { setExportOpen((v) => !v); setShareOpen(false); } }, h(Icons.download, { size: 14 }), "Export", h(Icons.chevD, { size: 12 })),
               exportOpen && h("div", { className: "popover", style: { top: "calc(100% + 6px)", right: 0, minWidth: 160 } },
-                ["PDF report", "JSON (full)", "CSV (findings)"].map((x) =>
-                  h("button", { key: x, className: "menu-item", onClick: () => { setExportOpen(false); toast({ kind: "success", msg: x + " export started" }); } }, h(Icons.file, { size: 14, style: { color: "var(--text-3)" } }), x)))),
+                [["html", "PDF report"], ["json", "JSON (full)"], ["csv", "CSV (findings)"]].map(([fmt, label]) =>
+                  h("button", { key: fmt, className: "menu-item", onClick: () => { setExportOpen(false); doExport(fmt, label); } }, h(Icons.file, { size: 14, style: { color: "var(--text-3)" } }), label)))),
             h("div", { style: { position: "relative" } },
               h("button", { className: "btn btn-secondary btn-sm", onClick: () => { setShareOpen((v) => !v); setExportOpen(false); } }, h(Icons.share, { size: 14 }), "Share"),
-              shareOpen && h(SharePopover, { toast, onClose: () => setShareOpen(false) })),
+              shareOpen && h(SharePopover, { toast, onClose: () => setShareOpen(false), scanId, meta: META })),
             h("button", { className: "btn btn-primary btn-sm", onClick: () => setHandoffOpen(true) }, h(Icons.terminal, { size: 14 }), "Hand off to Claude Code"))),
 
-        handoffOpen && h(HandoffModal, { onClose: () => setHandoffOpen(false), toast, counts }),
+        handoffOpen && h(HandoffModal, { onClose: () => setHandoffOpen(false), toast, counts, scanId, meta: META }),
 
         // ===== Tabs (no summary/strip here anymore) =====
         h("div", { style: { marginTop: 16 } }, h(Tabs, { tabs, active: tab, onChange: setTab }))),
 
       // ===== Tab content =====
       h("div", { style: { flex: 1, minHeight: 0, overflow: "hidden" } },
-        tab === "overview" && h(OverviewTab, { setTab }),
-        (tab === "findings" || tab === "optimizations" || tab === "stubs") && h(window.FindingsTab, { key: tab, mode: tab, selFile, setSelFile, suppressed, setSuppressed, toast, nav }),
-        tab === "dependencies" && h(window.DepsTab, null),
-        tab === "aigen" && h(window.AiGenTab, null),
-        tab === "history" && h(window.HistoryTab, { justScanned })),
+        tab === "overview" && h(OverviewTab, { setTab, meta: META, findings: ALL }),
+        (tab === "findings" || tab === "optimizations" || tab === "stubs") && h(window.FindingsTab, { key: tab, mode: tab, selFile, setSelFile, suppressed, setSuppressed, toast, nav, findings: ALL, meta: META }),
+        tab === "dependencies" && h(window.DepsTab, { meta: META }),
+        tab === "aigen" && h(window.AiGenTab, { meta: META, findings: ALL }),
+        tab === "history" && h(window.HistoryTab, { justScanned, meta: META })),
     );
   }
   window.ScanReport = ScanReport;
 
   // ===== Overview tab =====
-  function OverviewTab({ setTab }) {
+  function OverviewTab({ setTab, meta, findings }) {
     return h("div", { style: { height: "100%", overflow: "hidden", display: "flex", flexDirection: "column" } },
-      h(window.ReportChat, { setTab }));
+      h(window.ReportChat, { setTab, meta, findings }));
   }
 
-  function SharePopover({ toast, onClose }) {
+  function SharePopover({ toast, onClose, scanId, meta }) {
     const [copied, setCopied] = useState(false);
-    const link = "https://akira.ai/r/8fk2-demo";
+    const [link, setLink] = useState("");
+    const [tokenId, setTokenId] = useState(null);
+    const [loading, setLoading] = useState(!!scanId);
+
+    // Create-or-reuse a share link on open (for real scans).
+    useEffect(() => {
+      if (!scanId) { setLink("https://akira.ai/r/8fk2-demo"); setLoading(false); return; }
+      let alive = true;
+      const toLink = (s) => {
+        if (!s) return "";
+        const slug = s.slug || s.token || s.id;
+        return s.url || (API.BASE.replace("/api/v1", "") + "/api/v1/public/reports/" + slug);
+      };
+      API.reports.getShare(scanId)
+        .then((s) => (s && (s.slug || s.url || s.id)) ? s : API.reports.createShare(scanId))
+        .catch(() => API.reports.createShare(scanId))
+        .then((s) => { if (alive) { setLink(toLink(s)); setTokenId(s && s.id); setLoading(false); } })
+        .catch((e) => { if (alive) { setLoading(false); toast({ kind: "error", msg: "Couldn't create share link: " + ((e && e.message) || "error") }); } });
+      return () => { alive = false; };
+    }, [scanId]);
+
     return h("div", { className: "popover", style: { top: "calc(100% + 6px)", right: 0, width: 300, padding: 14 } },
       h("div", { style: { fontSize: 13, fontWeight: 650, marginBottom: 4 } }, "Share read-only report"),
       h("p", { style: { fontSize: 12, color: "var(--text-2)", marginBottom: 10 } }, "Anyone with the link can view this report. Code snippets are included."),
       h("div", { style: { display: "flex", gap: 6 } },
-        h("input", { className: "field mono", readOnly: true, value: link, style: { fontSize: 11.5 } }),
-        h("button", { className: "btn btn-primary btn-sm", style: { flexShrink: 0 }, onClick: () => { setCopied(true); toast({ kind: "success", msg: "Link copied to clipboard" }); setTimeout(() => setCopied(false), 1500); } },
+        h("input", { className: "field mono", readOnly: true, value: loading ? "Creating link…" : link, style: { fontSize: 11.5 } }),
+        h("button", { className: "btn btn-primary btn-sm", style: { flexShrink: 0 }, disabled: loading || !link,
+          onClick: () => { if (navigator.clipboard) navigator.clipboard.writeText(link); setCopied(true); toast({ kind: "success", msg: "Link copied to clipboard" }); setTimeout(() => setCopied(false), 1500); } },
           copied ? h(Icons.check, { size: 14 }) : h(Icons.copy, { size: 14 }))),
-      h("button", { className: "btn btn-ghost btn-sm", style: { marginTop: 10, color: "var(--sev-critical)" }, onClick: () => { toast({ kind: "info", msg: "Share link revoked" }); onClose(); } }, "Revoke link"));
+      h("button", { className: "btn btn-ghost btn-sm", style: { marginTop: 10, color: "var(--sev-critical)" },
+        onClick: () => {
+          if (scanId && tokenId) API.reports.deleteShare(tokenId).catch(() => {});
+          toast({ kind: "info", msg: "Share link revoked" }); onClose();
+        } }, "Revoke link"));
   }
 
   // ===== Hand off to Claude Code (MCP handoff) =====
-  function HandoffModal({ onClose, toast, counts }) {
+  function HandoffModal({ onClose, toast, counts, scanId, meta }) {
     const { Modal } = window;
     const [scope, setScope] = useState("critical_high");
     const [phase, setPhase] = useState("config"); // config | generated
     const [copied, setCopied] = useState("");
-    const base = (window.VS_API_BASE || "http://localhost:8000");
-    const auditId = META.id || "scan-1";
-    // Mock token — the real one comes from POST /audits/{id}/handoff/generate (once).
-    const token = "h0_" + Math.random().toString(36).slice(2, 14) + Math.random().toString(36).slice(2, 10);
-    const url = base + "/handoff/" + auditId + "?token=" + token;
-    const mcpAdd = "claude mcp add --transport http akira " + base + "/mcp";
+    const [generating, setGenerating] = useState(false);
+    const [url, setUrl] = useState("");
+    // Backend origin (strip the /api/v1 suffix from the client base).
+    const base = (window.AkiraAPI && window.AkiraAPI.BASE.replace(/\/api\/v1$/, "")) || "http://localhost:8000";
+    const auditId = (meta && meta.id) || scanId || "scan-1";
+    const mcpAdd = "claude mcp add --transport http akira " + base + "/api/v1/mcp";
+
+    async function generate() {
+      if (!scanId) { setUrl(base + "/handoff/" + auditId + "?token=demo"); setPhase("generated"); return; }
+      setGenerating(true);
+      try {
+        const res = await window.AkiraAPI.handoff.generate(auditId, { scope });
+        const link = res.url || (base + "/api/v1/handoff/" + auditId + "?token=" + (res.token || res.id));
+        setUrl(link); setPhase("generated");
+        toast({ kind: "success", msg: "Handoff link generated" });
+      } catch (e) {
+        toast({ kind: "error", msg: "Couldn't generate handoff: " + ((e && e.message) || "error") });
+      } finally {
+        setGenerating(false);
+      }
+    }
 
     const sec = counts.critical + counts.high + counts.medium + counts.low + counts.info;
     const stub = counts.stub || 0;
@@ -188,7 +398,7 @@
         phase === "config"
           ? h(React.Fragment, null,
               h("button", { className: "btn btn-ghost", onClick: onClose }, "Cancel"),
-              h("button", { className: "btn btn-primary", onClick: () => { setPhase("generated"); toast({ kind: "success", msg: "Handoff link generated" }); } }, h(Icons.terminal, { size: 15 }), "Generate handoff"))
+              h("button", { className: "btn btn-primary", disabled: generating, onClick: generate }, h(Icons.terminal, { size: 15 }), generating ? "Generating…" : "Generate handoff"))
           : h("button", { className: "btn btn-primary", onClick: onClose }, "Done"))));
   }
 
@@ -286,7 +496,8 @@
   }
 
   // ================= FINDINGS TAB =================
-  function FindingsTab({ mode, selFile, setSelFile, suppressed, setSuppressed, toast, nav }) {
+  function FindingsTab({ mode, selFile, setSelFile, suppressed, setSuppressed, toast, nav, findings: allFindings, meta }) {
+    const ALL = allFindings || window.VS_FINDINGS || [];
     const isOpt = mode === "optimizations";
     const isStub = mode === "stubs";
     const noun = isStub ? { one: "stub", many: "stubs" }
@@ -298,7 +509,7 @@
 
     const findings = useMemo(() => ALL.filter((f) =>
       isStub ? f.type === "stub" : isOpt ? f.type === "opt" : (f.type !== "opt" && f.type !== "stub")
-    ), [isOpt, isStub]);
+    ), [isOpt, isStub, ALL]);
     const files = useMemo(() => {
       const map = {};
       findings.forEach((f) => {
@@ -323,8 +534,7 @@
         else if (e.key === "k" || e.key === "K") setSelIdx((i) => Math.max(i - 1, 0));
         else if ((e.key === "f" || e.key === "F") && fileFindings[selIdx]) {
           const f = fileFindings[selIdx];
-          setSuppressed((s) => Object.assign({}, s, { [f.id]: true }));
-          toast({ kind: "info", msg: "Marked as false positive: " + f.name });
+          markFalsePositive(f, setSuppressed, toast);
         }
       }
       window.addEventListener("keydown", onKey);
@@ -366,7 +576,7 @@
           h("h3", null, "Nothing here"), h("p", null, "All " + (isStub ? "stubs" : isOpt ? "optimizations" : "vulnerabilities") + " in this file are suppressed or resolved.")),
         h("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
           fileFindings.map((f, i) => h(window.FindingCard, { key: f.id, f, idx: i, selected: i === selIdx, onSelect: () => setSelIdx(i),
-            onSuppress: () => { setSuppressed((s) => Object.assign({}, s, { [f.id]: true })); toast({ kind: "info", msg: "Suppressed — moved to false-positive list" }); },
+            onSuppress: () => markFalsePositive(f, setSuppressed, toast),
             toast, nav })))),
     );
   }

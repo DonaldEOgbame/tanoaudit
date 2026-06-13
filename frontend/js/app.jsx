@@ -47,14 +47,31 @@
     const [scanModal, setScanModal] = useState(false);
     const [scanning, setScanning] = useState(false);
     const [scanRepo, setScanRepo] = useState("user/ecommerce-api");
+    const [scanId, setScanId] = useState(null);
+    const [activeScanId, setActiveScanId] = useState(null);
     const [justScanned, setJustScanned] = useState(false);
     const [cmdOpen, setCmdOpen] = useState(false);
     const [settings, setSettings] = useState(null);
     const [collapsed, setCollapsed] = useState(false);
     const [demoOverride, setDemoOverride] = useState(null);
+    const [unreadCount, setUnreadCount] = useState(0);
+    const [notifOpen, setNotifOpen] = useState(false);
     const toast = window.useToast();
 
     const demoState = demoOverride || t.demoState;
+
+    useEffect(() => {
+      if (!user || !window.AkiraAPI) return;
+      let alive = true;
+      window.AkiraAPI.notifications.unreadCount()
+        .then((res) => {
+          if (!alive) return;
+          const count = res && typeof res.count === "number" ? res.count : (typeof res === "number" ? res : 0);
+          setUnreadCount(count);
+        })
+        .catch(() => {});
+      return () => { alive = false; };
+    }, [user]);
 
     useEffect(() => { applyTheme(t); }, [t.theme, t.mode, t.accent, t.density]);
 
@@ -67,26 +84,70 @@
       return () => window.removeEventListener("keydown", onKey);
     }, []);
 
-    function nav(p) { setPage(p); setPageKey((k) => k + 1); if (p !== "report") setJustScanned(false); }
-    function startScan() {
-      setScanModal(false); setScanning(true);
-      setDemoOverride("returning");
+    // nav(page) or nav("report", scanId) — the optional second arg targets a
+    // specific scan's report (used by dashboard/watchlist/scan-list rows).
+    function nav(p, targetScanId) {
+      if (p === "report" && targetScanId) { setScanId(targetScanId); setJustScanned(false); }
+      else if (p !== "report") { setJustScanned(false); }
+      setPage(p); setPageKey((k) => k + 1);
     }
-    function onScanComplete() {
-      setScanning(false); setJustScanned(true); setPage("report"); setPageKey((k) => k + 1);
-      toast({ kind: "success", title: "Scan complete", msg: scanRepo + " — 43 findings · risk score 38" });
+
+    // Kick off a real scan: POST /scans (or upload for ZIP), then take over with
+    // the live screen bound to the returned scan id.
+    async function startScan(config) {
+      const API = window.AkiraAPI;
+      const label = config.repo || config.source_url || config.fileName || "your project";
+      try {
+        let scan;
+        if (config.source_type === "zip") {
+          const { file } = config;
+          if (!file) { toast({ kind: "error", msg: "Choose a .zip file to scan" }); return; }
+          const { file: _omit, fileName: _omit2, ...cfg } = config;
+          scan = await API.scans.upload(file, cfg);
+        } else {
+          scan = await API.scans.create(config);
+        }
+        setScanModal(false);
+        setScanRepo(scan.repo || label);
+        setActiveScanId(scan.id);
+        setScanning(true);
+      } catch (e) {
+        toast({ kind: "error", title: "Couldn't start scan", msg: (e && e.message) || "Please try again." });
+      }
+    }
+
+    function onScanComplete(summary) {
+      setScanning(false); setJustScanned(true);
+      setScanId(activeScanId); setActiveScanId(null);
+      setPage("report"); setPageKey((k) => k + 1);
+      const parts = [];
+      if (summary && summary.security_score != null) parts.push("risk score " + summary.security_score);
+      toast({ kind: "success", title: "Scan complete", msg: scanRepo + (parts.length ? " — " + parts.join(" · ") : "") });
+    }
+
+    function onScanError(message) {
+      setScanning(false); setActiveScanId(null);
+      toast({ kind: "error", title: "Scan failed", msg: message || "The scan did not complete." });
     }
 
     // Full-screen live scan takes over
     if (scanning) {
-      return h(LiveScan, { repo: scanRepo, speed: t.scanSpeed, onComplete: onScanComplete, onCancel: () => { setScanning(false); toast({ kind: "info", msg: "Scan cancelled" }); } });
+      return h(LiveScan, {
+        repo: scanRepo, scanId: activeScanId, speed: t.scanSpeed,
+        onComplete: onScanComplete, onError: onScanError,
+        onCancel: () => {
+          if (activeScanId) { try { window.AkiraAPI.scans.control(activeScanId, "cancel"); } catch (e) {} }
+          setScanning(false); setActiveScanId(null);
+          toast({ kind: "info", msg: "Scan cancelled" });
+        },
+      });
     }
 
     let body;
     switch (page) {
       case "dashboard": body = h(Dashboard, { demoState, nav, user, onNewScan: () => setScanModal(true), onSample: () => { setDemoOverride("returning"); nav("report"); } }); break;
       case "scans":
-      case "report": body = h(ScanReport, { nav, toast, justScanned }); break;
+      case "report": body = h(ScanReport, { nav, toast, justScanned, scanId, repo: scanId ? scanRepo : null }); break;
       case "watchlist": body = h(WatchlistPage, { toast, nav }); break;
       case "reports": body = h(ReportsPage, { toast, nav }); break;
       case "custom": body = h(CustomVulnsPage, { toast }); break;
@@ -104,12 +165,38 @@
         // top bar
         h("div", { className: "vs-topbar" },
           h("span", { style: { fontSize: 13.5, fontWeight: 600 } }, titles[page] || "Akira AI"),
-          page === "report" && h("span", { className: "badge", style: { background: "var(--bg-active)", color: "var(--text-2)" } }, "user/ecommerce-api"),
+          page === "report" && h("span", { className: "badge", style: { background: "var(--bg-active)", color: "var(--text-2)" } }, scanId ? scanRepo : "user/ecommerce-api"),
           h("div", { style: { flex: 1 } }),
           h("button", { className: "icon-btn", "data-tip": "Search (⌘K)", onClick: () => setCmdOpen(true) }, h(Icons.search, { size: 16 })),
           h("button", { className: "icon-btn", "data-tip": t.mode === "dark" ? "Light mode" : "Dark mode", onClick: () => setTweak("mode", t.mode === "dark" ? "light" : "dark") },
             h(t.mode === "dark" ? Icons.sun : Icons.moon, { size: 16 })),
-          h("button", { className: "icon-btn", "data-tip": "Notifications" }, h(Icons.bell, { size: 16 })),
+          h("div", { style: { position: "relative" } },
+            h("button", {
+              id: "vs-bell-btn",
+              className: "icon-btn",
+              "data-tip": "Notifications",
+              onClick: () => setNotifOpen(!notifOpen)
+            },
+              h(Icons.bell, { size: 16 }),
+              unreadCount > 0 && h("span", {
+                style: {
+                  position: "absolute",
+                  top: 2,
+                  right: 2,
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  background: "var(--accent)"
+                }
+              })
+            ),
+            notifOpen && h(window.NotificationsPopover, {
+              onClose: () => setNotifOpen(false),
+              nav,
+              toast,
+              setUnreadCount
+            })
+          ),
           h("button", { className: "btn btn-secondary btn-sm", onClick: () => setSettings("general") }, h(Icons.settings, { size: 14 }), "Settings"),
         ),
         h("div", { key: pageKey, className: "vs-page" }, body),

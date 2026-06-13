@@ -44,9 +44,36 @@ to the live API is underway, **foundation-first**:
   branch), and `/profile`. App is gated behind a real session; profile name/initials/
   email and the dashboard greeting now come from the authenticated user. Logout clears
   tokens and re-gates. Verified end-to-end via headless Chrome against a live backend.
-- 🟡 **Everything else is still demo-data.** Dashboard stats/charts, scans, reports,
-  findings, watchlist, plans, custom vulns, library, live-scan WS, chat, settings
-  persistence — all still read `window.VS_*`. These are the next wiring slices.
+- ✅ **Scan flow** (`page-newscan.jsx`, `page-livescan.jsx`, `app.jsx`): New Scan now
+  emits a real `ScanCreate` config (github/url/ZIP, depth, models, include flags; ZIP
+  captures the actual `File` via drag/drop or click-to-browse) and `startScan` calls
+  `POST /scans` (or `/scans/upload`). The full-screen Live Scan binds to the returned
+  scan id and streams `scan_started`/`file_parsed`/`scan_progress`/`finding_discovered`/
+  `scan_completed`/`scan_failed` over the WebSocket (`AkiraAPI.scans.openWS`), driving
+  the percentage + live finding count; Cancel sends the cancel control. With no scan id
+  (the Tweaks "Run a demo scan" showcase) it falls back to the timed simulation.
+  Verified end-to-end through the real frontend (headless Chrome): login → ZIP upload →
+  live WS event stream → completion, zero exceptions.
+- 🟢 **Two backend robustness fixes surfaced during scan wiring** (both fail-open):
+  - Event-bus Redis `socket_connect_timeout` was hardcoded `0.5s` — too tight for a
+    TLS handshake to managed Redis (Upstash `rediss://` measured ~1.5s), so the bus
+    silently fell back to in-memory and live scan events never crossed from the worker
+    process to the API's WebSocket (arq still worked, masking it). Now configurable via
+    `REDIS_CONNECT_TIMEOUT` (default `5.0`), with an INFO/WARNING log of the chosen
+    backend. `scan_events._get_redis`.
+  - Rate limiter (`core/ratelimit.py`) now catches Redis op failures and falls back to
+    the in-memory window instead of letting a transient Redis timeout bubble up as a
+    500 on the protected endpoint (e.g. login).
+- 🟡 **Report page still demo-data.** The live scan transitions into `ScanReport`, which
+  still renders `window.VS_*` findings; `scanId`/`repo` are now passed in but not yet
+  consumed. Remaining demo-data screens: report/findings tabs, dashboard stats/charts,
+  scans list, watchlist, plans, custom vulns, library, chat, settings persistence.
+- 🟢 **Live cross-process events require Redis** (unchanged by design): the worker and
+  API are separate processes, so they only share the event stream through Redis. With
+  no reachable Redis *and* no separate worker, scans run in-process (BackgroundTasks)
+  and the same-process in-memory bus still feeds the WS. A separate worker + no Redis is
+  the one combo where the WS sees nothing live (replay is also empty) — acceptable, and
+  now far less likely to trip silently thanks to the timeout fix above.
 
 ## Post-launch feature additions (this session)
 

@@ -254,8 +254,17 @@ Is there a specific finding, file, or category you'd like me to explain?`;
 
   const INIT_MSGS = [{ id: 0, role: "ai", text: EXEC_SUMMARY, initial: true }];
 
-  function ReportChat({ setTab }) {
-    const [messages, setMessages] = useState(INIT_MSGS);
+  function ReportChat({ setTab, meta, findings }) {
+    const API = window.AkiraAPI;
+    const META = meta || window.VS_REPO_META;
+    const scanId = META && META.id && meta ? META.id : null; // only treat as real when meta came from a scan
+    // Seed the first AI message from the real executive summary when available.
+    const initial = React.useMemo(() => (
+      scanId && META.summary
+        ? [{ id: 0, role: "ai", text: META.summary, initial: true }]
+        : INIT_MSGS
+    ), [scanId]);
+    const [messages, setMessages] = useState(initial);
     const [input, setInput] = useState("");
     const [streaming, setStreaming] = useState(false);
     const [editingId, setEditingId] = useState(null);
@@ -265,7 +274,6 @@ Is there a specific finding, file, or category you'd like me to explain?`;
     const scrollRef = useRef();
     const taRef = useRef();
     const ivRef = useRef();
-    const META = window.VS_REPO_META;
 
     function scrollToBottom(smooth) {
       if (scrollRef.current) scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: smooth === false ? "instant" : "smooth" });
@@ -322,6 +330,25 @@ Is there a specific finding, file, or category you'd like me to explain?`;
       }
       setStreaming(true);
       setTimeout(() => scrollToBottom(), 60);
+
+      // Real scan: ask the backend. Otherwise fall back to the canned demo reply.
+      if (scanId && API) {
+        const history = messages
+          .filter((m) => !m.thinking && !m.initial && (m.role === "user" || m.role === "ai"))
+          .map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text }));
+        API.chat.send(scanId, q, history)
+          .then((res) => {
+            const text = (res && (res.reply || res.message || res.answer || res.content)) || "(no response)";
+            setMessages(p => p.map(m => m.id === aid ? { ...m, thinking: false, text } : m));
+            setStreaming(false);
+            setTimeout(() => { taRef.current && taRef.current.focus(); scrollToBottom(); }, 80);
+          })
+          .catch((e) => {
+            setMessages(p => p.map(m => m.id === aid ? { ...m, thinking: false, text: "⚠️ " + ((e && e.message) || "Chat failed.") } : m));
+            setStreaming(false);
+          });
+        return;
+      }
 
       const resp = getResponse(q);
       setTimeout(() => {

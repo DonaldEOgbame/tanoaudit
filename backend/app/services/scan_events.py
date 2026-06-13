@@ -15,10 +15,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
 
 from app.core.config import settings
+
+logger = logging.getLogger("akira.events")
 
 # Event type names — must match what the frontend's live screen consumes.
 SCAN_STARTED = "scan_started"
@@ -74,11 +77,14 @@ class ScanEventBus:
             import redis.asyncio as aioredis
             client = aioredis.from_url(
                 url, decode_responses=True,
-                socket_connect_timeout=0.5, socket_timeout=2.0,
+                socket_connect_timeout=settings.redis_connect_timeout,
+                socket_timeout=2.0,
             )
             await client.ping()
             self._redis = client
-        except Exception:
+            logger.info("event bus: connected to Redis")
+        except Exception as exc:
+            logger.warning("event bus: Redis unavailable (%s) -> in-memory", exc)
             self._redis = None  # unreachable -> in-memory
         return self._redis
 

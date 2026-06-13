@@ -1,4 +1,8 @@
-// Akira AI — Live Scan screen (minimal: percentage + rotating facts + Claude-style shimmer)
+// Akira AI — Live Scan screen.
+// When given a real scanId, it streams progress from the backend WebSocket
+// (scan_progress / finding_discovered / scan_completed / scan_failed). With no
+// scanId (the Tweaks "Run a demo scan" showcase) it falls back to a timed
+// simulation so the animation still demos standalone.
 (function () {
   const React = window.React;
   const { useState, useEffect, useRef } = React;
@@ -19,18 +23,65 @@
     "Writing up findings…",
   ];
 
-  function LiveScan({ repo, speed, onComplete, onCancel }) {
+  function LiveScan({ repo, scanId, speed, onComplete, onError, onCancel }) {
     const [progress, setProgress] = useState(0);
     const [factIdx, setFactIdx] = useState(0);
     const [factOut, setFactOut] = useState(false);
     const [statusIdx, setStatusIdx] = useState(0);
     const [completing, setCompleting] = useState(false);
+    const [findingCount, setFindingCount] = useState(0);
 
     const speedRef = useRef(speed || 1); speedRef.current = speed || 1;
     const completingRef = useRef(false);
+    const wsRef = useRef(null);
 
-    // Progress driver (interval-based: robust where rAF is throttled)
+    function finish(summary) {
+      if (completingRef.current) return;
+      completingRef.current = true;
+      setProgress(100);
+      setCompleting(true);
+      setTimeout(() => onComplete && onComplete(summary), 1000);
+    }
+
+    // --- Live mode: drive everything from the backend WebSocket. ---
     useEffect(() => {
+      if (!scanId || !window.AkiraAPI) return undefined;
+      const conn = window.AkiraAPI.scans.openWS(scanId, {
+        onEvent(type, payload) {
+          switch (type) {
+            case "scan_progress":
+              if (typeof payload.percent === "number") {
+                setProgress((p) => Math.max(p, Math.min(payload.percent, 99)));
+              }
+              break;
+            case "finding_discovered":
+              setFindingCount((n) => n + 1);
+              break;
+            case "scan_completed":
+              finish(payload);
+              break;
+            case "scan_failed":
+              if (onError) onError(payload && payload.error);
+              break;
+            case "scan_cancelled":
+              // The app already handled the cancel intent; just stop.
+              break;
+            default:
+              break;
+          }
+        },
+        onError() {
+          // A transport error before completion surfaces as a scan error.
+          if (!completingRef.current && onError) onError("Lost connection to the scan.");
+        },
+      });
+      wsRef.current = conn;
+      return () => conn.close();
+    }, [scanId]);
+
+    // --- Demo mode: timed simulation when there's no real scan. ---
+    useEffect(() => {
+      if (scanId) return undefined; // live mode owns progress
       let last = performance.now();
       const DURATION = 45000; // ms at 1x
       const iv = setInterval(() => {
@@ -39,16 +90,12 @@
         if (completingRef.current) return;
         setProgress((p) => {
           const np = Math.min(p + (dt / (DURATION / speedRef.current)) * 100, 100);
-          if (np >= 100 && !completingRef.current) {
-            completingRef.current = true;
-            setCompleting(true);
-            setTimeout(() => onComplete(), 1000);
-          }
+          if (np >= 100) finish(null);
           return np;
         });
       }, 40);
       return () => clearInterval(iv);
-    }, []);
+    }, [scanId]);
 
     // Rotating facts
     useEffect(() => {
@@ -81,6 +128,8 @@
         h("span", { className: "pulse-dot", style: { width: 8, height: 8, borderRadius: "50%", background: "var(--accent)" } }),
         h("div", { style: { fontSize: 13, color: "var(--text-2)" } }, "Scanning ", h("span", { className: "mono", style: { color: "var(--accent)" } }, repo || "user/ecommerce-api")),
         h("div", { style: { flex: 1 } }),
+        findingCount > 0 && h("span", { className: "badge", style: { background: "var(--bg-active)", color: "var(--text-2)", marginRight: 4 } },
+          findingCount, findingCount === 1 ? " finding" : " findings"),
         h("button", { className: "btn btn-danger btn-sm", onClick: onCancel }, "Cancel"),
       ),
 

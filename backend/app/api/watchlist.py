@@ -47,6 +47,7 @@ async def _watchlist_item(db: AsyncSession, repo: Repository) -> dict:
         change=change["change_label"], change_dir=change["direction"],
         new_criticals=change["new_criticals"], freq=repo.frequency,
         last=repo.last_scanned_at,
+        last_scan_id=repo.last_scan_id,
     ).model_dump()
 
 

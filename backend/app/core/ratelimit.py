@@ -29,10 +29,15 @@ async def _hit(key: str, limit: int, window: int) -> bool:
     bucket = now // window
     full_key = f"akira:rl:{key}:{bucket}"
     if redis is not None:
-        count = await redis.incr(full_key)
-        if count == 1:
-            await redis.expire(full_key, window)
-        return count <= limit
+        # Fail open to the in-memory window if a Redis op hiccups (timeout, drop):
+        # the rate limiter must never 500 the endpoint it's protecting.
+        try:
+            count = await redis.incr(full_key)
+            if count == 1:
+                await redis.expire(full_key, window)
+            return count <= limit
+        except Exception:  # noqa: BLE001
+            pass
     # In-memory fixed window.
     start, count = _local.get(full_key, (now, 0))
     count += 1

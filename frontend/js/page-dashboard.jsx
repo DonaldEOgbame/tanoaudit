@@ -1,10 +1,115 @@
-// VaultScan — Dashboard (returning + first-run onboarding)
+// Akira AI — Dashboard (returning + first-run onboarding), wired to real data.
 (function () {
   const React = window.React;
-  const { useState, useEffect } = React;
+  const { useState, useEffect, useCallback } = React;
   const h = React.createElement;
   const Icons = window.Icons;
-  const { CountUp, SevDot, SevBadge, Avatar, ProgressBar, Ring, scoreColor } = window;
+  const API = window.AkiraAPI;
+  const { CountUp, SevDot, ProgressBar, scoreColor } = window;
+
+  function errMsg(e) { return (e && e.message) || "Something went wrong"; }
+
+  // ---- small derivation helpers -------------------------------------------
+
+  // worst_severity → the SEV key our UI components understand.
+  function sevKey(s) {
+    const k = (s || "").toLowerCase();
+    if (k === "critical" || k === "high" || k === "medium" || k === "low" || k === "info") return k;
+    // "none"/"clean"/empty all read as clean.
+    return "clean";
+  }
+
+  // ISO timestamp → "just now" / "2h ago" / "3d ago" / "Apr 2".
+  function relTime(iso) {
+    if (!iso) return "—";
+    const t = new Date(iso).getTime();
+    if (isNaN(t)) return "—";
+    const diff = Date.now() - t;
+    if (diff < 0) return "just now";
+    const min = Math.floor(diff / 60000);
+    if (min < 1) return "just now";
+    if (min < 60) return min + "m ago";
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return hr + "h ago";
+    const day = Math.floor(hr / 24);
+    if (day < 7) return day + "d ago";
+    if (day < 30) return Math.floor(day / 7) + "w ago";
+    return new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+
+  // Build a 12-month scan-volume series from real created_at timestamps.
+  function scanVolume(items) {
+    const now = new Date();
+    const buckets = [];
+    const index = {};
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = d.getFullYear() + "-" + d.getMonth();
+      const label = d.toLocaleDateString(undefined, { month: "short" });
+      index[key] = buckets.length;
+      buckets.push({ label, value: 0, full: d.toLocaleDateString(undefined, { month: "short", year: "numeric" }) });
+    }
+    items.forEach((s) => {
+      if (!s.created_at) return;
+      const d = new Date(s.created_at);
+      if (isNaN(d.getTime())) return;
+      const key = d.getFullYear() + "-" + d.getMonth();
+      if (index[key] != null) buckets[index[key]].value += 1;
+    });
+    return buckets;
+  }
+
+  // Distribution of scans by worst-severity (real per-scan field).
+  function sevDistribution(items) {
+    const order = ["critical", "high", "medium", "low"];
+    const colors = {
+      critical: "var(--sev-critical)", high: "var(--sev-high)",
+      medium: "var(--sev-medium)", low: "var(--sev-low)",
+    };
+    const labels = { critical: "Critical", high: "High", medium: "Medium", low: "Low" };
+    const counts = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
+    items.forEach((s) => { counts[sevKey(s.worst_severity)] = (counts[sevKey(s.worst_severity)] || 0) + 1; });
+    const segments = order.map((k) => ({ label: labels[k], n: counts[k], color: colors[k] }));
+    return { segments, clean: counts.clean, flagged: order.reduce((a, k) => a + counts[k], 0) };
+  }
+
+  // Derive an activity feed from recent scans (no separate activity endpoint).
+  // Each scan yields one entry describing its outcome.
+  function deriveActivity(items) {
+    return items.slice(0, 6).map((s) => {
+      const st = (s.status || "").toLowerCase();
+      let icon = "list", action = "ran a scan on";
+      if (st === "completed") {
+        const sev = sevKey(s.worst_severity);
+        if (sev === "clean") { icon = "check"; action = "completed a clean scan of"; }
+        else { icon = "flag"; action = "finished a scan (" + sev + ") of"; }
+      } else if (st === "running" || st === "in_progress" || st === "queued" || st === "pending") {
+        icon = "refresh"; action = "is scanning";
+      } else if (st === "failed" || st === "error") {
+        icon = "alert"; action = "failed a scan of";
+      } else if (st === "cancelled" || st === "canceled") {
+        icon = "alert"; action = "cancelled a scan of";
+      }
+      return {
+        key: s.id, who: "You", action, target: s.repo,
+        when: relTime(s.completed_at || s.created_at), icon,
+      };
+    });
+  }
+
+  // ---- shared placeholders -------------------------------------------------
+  function LoadingBlock({ label }) {
+    return h("div", { className: "empty-state", style: { padding: "60px 0" } },
+      h("div", { className: "spinner", style: { margin: "0 auto 12px" } }),
+      h("p", null, label || "Loading…"));
+  }
+  function ErrorBlock({ msg, onRetry }) {
+    return h("div", { className: "empty-state", style: { padding: "56px 0" } },
+      h("div", { className: "es-icon" }, h(Icons.alert, { size: 24, style: { color: "var(--sev-high)" } })),
+      h("h3", null, "Couldn't load your dashboard"),
+      h("p", null, msg || "Please try again."),
+      onRetry && h("button", { className: "btn btn-secondary btn-sm", style: { marginTop: 10 }, onClick: onRetry }, "Retry"));
+  }
 
   function Stat({ label, value, sub, color, icon, suffix }) {
     return h("div", { className: "card card-hover", style: { padding: "16px 18px", display: "flex", flexDirection: "column", gap: 4 } },
@@ -18,29 +123,67 @@
     );
   }
 
-  // Dashboard chart data
-  const SCAN_VOLUME = [
-    ["Jul", 6], ["Aug", 9], ["Sep", 7], ["Oct", 11], ["Nov", 10], ["Dec", 12],
-    ["Jan", 9], ["Feb", 13], ["Mar", 11], ["Apr", 14], ["May", 12], ["Jun", 17],
-  ].map(([label, value], i) => ({ label, value, full: label + " " + (i < 6 ? "2025" : "2026") }));
-  const SEV_MIX = [
-    { label: "Critical", n: 7, color: "var(--sev-critical)" },
-    { label: "High", n: 18, color: "var(--sev-high)" },
-    { label: "Medium", n: 26, color: "var(--sev-medium)" },
-    { label: "Low", n: 12, color: "var(--sev-low)" },
-  ];
-
   function Dashboard({ demoState, nav, onNewScan, onSample, user }) {
-    if (demoState === "first-run") return h(FirstRun, { onNewScan, onSample });
+    const [state, setState] = useState({ loading: true, error: null, scans: null, usage: null });
+
+    const load = useCallback(async () => {
+      setState((s) => Object.assign({}, s, { loading: true, error: null }));
+      try {
+        // Usage is supplementary — if it fails, we still render from scans.
+        const [scansRes, usageRes] = await Promise.all([
+          API.scans.list({ limit: 50 }),
+          API.usage.get().catch(() => null),
+        ]);
+        setState({ loading: false, error: null, scans: scansRes || { items: [], total: 0 }, usage: usageRes });
+      } catch (e) {
+        setState({ loading: false, error: errMsg(e), scans: null, usage: null });
+      }
+    }, []);
+
+    useEffect(() => { load(); }, [load]);
 
     const firstName = (() => {
-      if (!user) return "Alex";
+      if (!user) return "there";
       const n = user.display_name || user.full_name || (user.email ? user.email.split("@")[0] : "");
       return n ? n.trim().split(/\s+/)[0] : "there";
     })();
-    const scans = window.VS_SCANS;
-    const activity = window.VS_ACTIVITY;
-    const totalCrit = 7;
+
+    if (state.loading) return h("div", { className: "vs-page-pad" }, h(LoadingBlock, { label: "Loading your dashboard…" }));
+    if (state.error) return h("div", { className: "vs-page-pad" }, h(ErrorBlock, { msg: state.error, onRetry: load }));
+
+    const items = (state.scans && state.scans.items) || [];
+    const total = (state.scans && state.scans.total) || items.length;
+
+    // First-run / empty state keyed off whether the user has any scans.
+    if (items.length === 0) return h(FirstRun, { firstName, onNewScan, onSample });
+
+    return h(ReturningDashboard, { items, total, usage: state.usage, firstName, nav, onNewScan });
+  }
+  window.Dashboard = Dashboard;
+
+  // ---- Returning user dashboard (real data) ----
+  function ReturningDashboard({ items, total, usage, firstName, nav, onNewScan }) {
+    const completed = items.filter((s) => (s.status || "").toLowerCase() === "completed");
+    const running = items.filter((s) => {
+      const st = (s.status || "").toLowerCase();
+      return st === "running" || st === "in_progress" || st === "queued" || st === "pending";
+    });
+
+    // Avg security score across completed scans (real scores).
+    const avgScore = completed.length
+      ? Math.round(completed.reduce((a, s) => a + (s.security_score || 0), 0) / completed.length)
+      : 0;
+
+    const scansThisMonth = usage && usage.scans_this_month != null ? usage.scans_this_month : null;
+    const lifetimeSegments = usage && usage.lifetime_segments != null ? usage.lifetime_segments : null;
+
+    const volume = scanVolume(items);
+    const volTotal = volume.reduce((a, d) => a + d.value, 0);
+    const { segments: sevSeg, clean: cleanCount, flagged } = sevDistribution(items);
+
+    const recent = items.slice(0, 6);
+    const activity = deriveActivity(items);
+
     return h("div", { className: "vs-page-pad vs-page-enter" },
       h("div", { style: { display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 22, flexWrap: "wrap", gap: 12 } },
         h("div", null,
@@ -50,12 +193,27 @@
         h("button", { className: "btn btn-primary btn-lg", onClick: onNewScan }, h(Icons.plus, { size: 17, sw: 2.2 }), "New Scan"),
       ),
 
-      // Stat cards
+      // Stat cards — all derived from real data.
       h("div", { className: "stagger-in", style: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 24 } },
-        h(Stat, { label: "Total scans", value: 142, sub: "+12 this month", icon: "list" }),
-        h(Stat, { label: "Open Criticals", value: totalCrit, sub: "across 3 repos", color: "var(--sev-critical)", icon: "alert" }),
-        h(Stat, { label: "Watchlist alerts", value: 4, sub: "2 repos changed", color: "var(--sev-high)", icon: "bell" }),
-        h(Stat, { label: "Avg. plan progress", value: 64, suffix: "%", sub: "3 active plans", color: "var(--accent)", icon: "sliders" }),
+        h(Stat, {
+          label: "Total scans", value: total, icon: "list",
+          sub: scansThisMonth != null ? ("+" + scansThisMonth + " this month") : (running.length ? running.length + " in progress" : null),
+        }),
+        h(Stat, {
+          label: "Avg. security score", value: avgScore, suffix: "/100",
+          color: scoreColor(avgScore), icon: "shield",
+          sub: completed.length + " completed scan" + (completed.length === 1 ? "" : "s"),
+        }),
+        h(Stat, {
+          label: "Flagged scans", value: flagged,
+          color: flagged ? "var(--sev-high)" : "var(--sev-clean)", icon: "alert",
+          sub: cleanCount + " clean of " + items.length + " recent",
+        }),
+        h(Stat, {
+          label: "Segments analyzed", value: lifetimeSegments != null ? lifetimeSegments : items.reduce((a, s) => a + (s.segments_analyzed || 0), 0),
+          icon: "cpu",
+          sub: lifetimeSegments != null ? "lifetime" : "recent scans",
+        }),
       ),
 
       // Charts row
@@ -64,22 +222,33 @@
           h("div", { style: { display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 } },
             h("div", null,
               h("h3", { style: { fontSize: 14, fontWeight: 650 } }, "Scan volume"),
-              h("p", { style: { fontSize: 12, color: "var(--text-3)", marginTop: 1 } }, "Scans per month across all repos")),
-            h("span", { className: "badge", style: { background: "var(--accent-soft)", color: "var(--accent)" } }, "\u2191 42% this month")),
-          h(window.RoundedBars, { data: SCAN_VOLUME, highlightIndex: 11, height: 160,
-            tipFor: (i) => SCAN_VOLUME[i].value + " scans \u00b7 " + SCAN_VOLUME[i].full })),
+              h("p", { style: { fontSize: 12, color: "var(--text-3)", marginTop: 1 } }, "Scans per month (last 12 months)")),
+            h("span", { className: "badge", style: { background: "var(--accent-soft)", color: "var(--accent)" } }, volTotal + " in range")),
+          volTotal === 0
+            ? h("div", { className: "empty-state", style: { padding: "32px 0" } },
+                h("p", null, "No scans in the last 12 months yet."))
+            : h(window.RoundedBars, {
+                data: volume, highlightIndex: volume.length - 1, height: 160,
+                tipFor: (i) => volume[i].value + " scan" + (volume[i].value === 1 ? "" : "s") + " · " + volume[i].full,
+              })),
         h("div", { className: "card", style: { padding: "16px 20px", display: "flex", flexDirection: "column" } },
-          h("h3", { style: { fontSize: 14, fontWeight: 650 } }, "Open findings"),
-          h("p", { style: { fontSize: 12, color: "var(--text-3)", marginTop: 1 } }, "By severity, all repos"),
-          h("div", { style: { display: "flex", alignItems: "center", gap: 20, flex: 1, marginTop: 10 } },
-            h(window.RingStat, { segments: SEV_MIX.map((s) => ({ value: s.n, color: s.color })), size: 144, stroke: 12,
-              centerBig: SEV_MIX.reduce((s, x) => s + x.n, 0), centerSmall: "open findings" }),
-            h("div", { style: { display: "flex", flexDirection: "column", gap: 9, flex: 1 } },
-              SEV_MIX.map((s) =>
-                h("div", { key: s.label, style: { display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 } },
-                  h("span", { className: "sev-dot", style: { width: 8, height: 8, background: s.color } }),
-                  h("span", { style: { flex: 1, color: "var(--text-2)" } }, s.label),
-                  h("span", { style: { fontWeight: 650, fontVariantNumeric: "tabular-nums" } }, s.n)))))),
+          h("h3", { style: { fontSize: 14, fontWeight: 650 } }, "Scans by worst severity"),
+          h("p", { style: { fontSize: 12, color: "var(--text-3)", marginTop: 1 } }, "Recent scans, by highest finding"),
+          flagged === 0
+            ? h("div", { className: "empty-state", style: { padding: "24px 0", flex: 1, justifyContent: "center" } },
+                h("div", { className: "es-icon" }, h(Icons.check, { size: 22, style: { color: "var(--sev-clean)" } })),
+                h("p", null, "All " + items.length + " recent scans are clean."))
+            : h("div", { style: { display: "flex", alignItems: "center", gap: 20, flex: 1, marginTop: 10 } },
+                h(window.RingStat, {
+                  segments: sevSeg.map((s) => ({ value: s.n, color: s.color })), size: 144, stroke: 12,
+                  centerBig: flagged, centerSmall: "flagged scans",
+                }),
+                h("div", { style: { display: "flex", flexDirection: "column", gap: 9, flex: 1 } },
+                  sevSeg.map((s) =>
+                    h("div", { key: s.label, style: { display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 } },
+                      h("span", { className: "sev-dot", style: { width: 8, height: 8, background: s.color } }),
+                      h("span", { style: { flex: 1, color: "var(--text-2)" } }, s.label),
+                      h("span", { style: { fontWeight: 650, fontVariantNumeric: "tabular-nums" } }, s.n)))))),
       ),
 
       h("div", { style: { display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 18, alignItems: "stretch" } },
@@ -91,47 +260,54 @@
           ),
           h("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 13 } },
             h("thead", null, h("tr", { style: { color: "var(--text-3)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" } },
-              ["Repository", "Risk", "Findings", "Scanned"].map((c, i) =>
+              ["Repository", "Score", "Segments", "Scanned"].map((c, i) =>
                 h("th", { key: c, style: { textAlign: i > 0 ? "right" : "left", padding: "8px 18px", fontWeight: 600 } }, c)))),
-            h("tbody", null, scans.map((s) =>
-              h("tr", { key: s.id, onClick: () => nav("report"), style: { cursor: "pointer", borderTop: "1px solid var(--border)" },
+            h("tbody", null, recent.map((s) => {
+              const st = (s.status || "").toLowerCase();
+              const isDone = st === "completed";
+              return h("tr", {
+                key: s.id, onClick: () => nav("report", s.id),
+                style: { cursor: "pointer", borderTop: "1px solid var(--border)" },
                 onMouseEnter: (e) => e.currentTarget.style.background = "var(--bg-hover)",
-                onMouseLeave: (e) => e.currentTarget.style.background = "transparent" },
+                onMouseLeave: (e) => e.currentTarget.style.background = "transparent",
+              },
                 h("td", { style: { padding: "11px 18px", display: "flex", alignItems: "center", gap: 9 } },
-                  h(SevDot, { sev: s.sev }), h("span", { style: { fontWeight: 550 } }, s.repo)),
+                  h(SevDot, { sev: sevKey(s.worst_severity) }), h("span", { style: { fontWeight: 550 } }, s.repo)),
                 h("td", { style: { textAlign: "right", padding: "11px 18px" } },
-                  h("span", { style: { fontWeight: 650, color: scoreColor(s.score), fontVariantNumeric: "tabular-nums" } }, s.score)),
-                h("td", { style: { textAlign: "right", padding: "11px 18px", fontVariantNumeric: "tabular-nums", color: "var(--text-2)" } }, s.issues),
-                h("td", { style: { textAlign: "right", padding: "11px 18px", color: "var(--text-3)", whiteSpace: "nowrap" } }, s.when),
-              ))),
+                  isDone
+                    ? h("span", { style: { fontWeight: 650, color: scoreColor(s.security_score || 0), fontVariantNumeric: "tabular-nums" } }, s.security_score)
+                    : h("span", { style: { color: "var(--text-3)", textTransform: "capitalize" } }, st || "—")),
+                h("td", { style: { textAlign: "right", padding: "11px 18px", fontVariantNumeric: "tabular-nums", color: "var(--text-2)" } },
+                  (s.segments_analyzed || 0) + "/" + (s.segment_total || 0)),
+                h("td", { style: { textAlign: "right", padding: "11px 18px", color: "var(--text-3)", whiteSpace: "nowrap" } },
+                  relTime(s.completed_at || s.created_at)),
+              );
+            })),
           ),
         ),
 
-        // Activity feed
+        // Activity feed (derived from recent scans — no separate activity endpoint).
         h("div", { className: "card", style: { padding: "13px 4px 8px" } },
           h("h3", { style: { fontSize: 14, fontWeight: 650, padding: "0 16px 10px" } }, "Activity"),
           h("div", { style: { display: "flex", flexDirection: "column" } },
-            activity.map((a, i) => {
-              const iconMap = { scan: "list", flag: "flag", reroute: "refresh", github: "github", check: "check", bell: "bell" };
-              return h("div", { key: i, style: { display: "flex", gap: 10, padding: "9px 16px", alignItems: "flex-start" } },
+            activity.map((a) =>
+              h("div", { key: a.key, style: { display: "flex", gap: 10, padding: "9px 16px", alignItems: "flex-start" } },
                 h("div", { style: { width: 26, height: 26, borderRadius: 7, background: "var(--bg-active)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "var(--text-2)" } },
-                  h(Icons[iconMap[a.icon]] || Icons.dot, { size: 14 })),
+                  h(Icons[a.icon] || Icons.dot, { size: 14 })),
                 h("div", { style: { fontSize: 12.5, lineHeight: 1.45 } },
                   h("span", { style: { fontWeight: 600 } }, a.who), " ",
                   h("span", { style: { color: "var(--text-2)" } }, a.action), " ",
                   h("span", { style: { fontWeight: 550 } }, a.target),
                   h("div", { style: { fontSize: 11, color: "var(--text-3)", marginTop: 1 } }, a.when),
                 ),
-              );
-            })),
+              ))),
         ),
       ),
     );
   }
-  window.Dashboard = Dashboard;
 
   // ---- First-run onboarding ----
-  function FirstRun({ onNewScan, onSample }) {
+  function FirstRun({ firstName, onNewScan, onSample }) {
     const [done, setDone] = useState({ 1: false, 2: false, 3: false });
     const steps = [
       { n: 1, title: "Connect GitHub", desc: "Authorize Akira AI to read the repositories you want to scan.", cta: "Connect", icon: "github" },
@@ -144,7 +320,8 @@
       // Hero
       h("div", { style: { textAlign: "center", padding: "30px 0 28px" } },
         h(FloatingShield, null),
-        h("h1", { style: { fontSize: 30, fontWeight: 750, letterSpacing: "-0.025em", marginTop: 18 } }, "Welcome to Akira AI"),
+        h("h1", { style: { fontSize: 30, fontWeight: 750, letterSpacing: "-0.025em", marginTop: 18 } },
+          firstName && firstName !== "there" ? ("Welcome, " + firstName) : "Welcome to Akira AI"),
         h("p", { style: { color: "var(--text-2)", fontSize: 15, maxWidth: 520, margin: "8px auto 0", textWrap: "pretty" } },
           "One scan, two engines — find ", h("strong", { style: { color: "var(--text-1)" } }, "187 vulnerability classes"),
           " and optimize performance, quality and scale at the same time."),
@@ -171,7 +348,7 @@
                 border: "1px solid " + (isDone ? "transparent" : "var(--border)"), transition: "all var(--dur-med) var(--ease-spring)",
               } }, isDone ? h(Icons.check, { size: 18, sw: 2.4 }) : h(Icons[s.icon], { size: 17 })),
               h("div", { style: { flex: 1 } },
-                h("div", { style: { fontSize: 13.5, fontWeight: 600, textDecoration: isDone ? "none" : "none" } }, s.title),
+                h("div", { style: { fontSize: 13.5, fontWeight: 600 } }, s.title),
                 h("div", { style: { fontSize: 12.5, color: "var(--text-2)", marginTop: 1 } }, s.desc),
               ),
               isDone
@@ -191,7 +368,7 @@
         h("div", { style: { width: 46, height: 46, borderRadius: 12, background: "var(--accent-soft)", color: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, h(Icons.sparkle, { size: 24 })),
         h("div", { style: { flex: 1 } },
           h("div", { style: { fontSize: 15, fontWeight: 650 } }, "Explore a sample report"),
-          h("div", { style: { fontSize: 13, color: "var(--text-2)", marginTop: 2 } }, "See a fully-populated scan of a demo repo — 43 findings, diffs, and AI fixes — before you scan anything."),
+          h("div", { style: { fontSize: 13, color: "var(--text-2)", marginTop: 2 } }, "See a fully-populated scan of a demo repo — findings, diffs, and AI fixes — before you scan anything."),
         ),
         h("button", { className: "btn btn-primary" }, "Open demo", h(Icons.chevR, { size: 15 })),
       ),
