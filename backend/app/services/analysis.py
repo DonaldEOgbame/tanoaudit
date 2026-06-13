@@ -431,6 +431,76 @@ def parse_batch(raw: str | None, n: int) -> list[AnalysisResult | None]:
     return results
 
 
+async def _analyze_subset(
+    segments: list[SegmentData],
+    complete: CompleteFn,
+    *,
+    include_optimization: bool,
+    model_hint: str | None,
+    custom_vulns: list[str] | None,
+    suppressions: list[str] | None,
+) -> list[AnalysisResult | None]:
+    """Analyze a small subset for recovery: split in half until size 1, where
+    the single-segment path (analyze_segment) is most reliable. Returns
+    index-aligned results for the subset."""
+    if len(segments) == 1:
+        return [await analyze_segment(
+            segments[0], complete, include_optimization=include_optimization,
+            model_hint=model_hint, custom_vulns=custom_vulns, suppressions=suppressions,
+        )]
+    prompt = build_batch_prompt(segments, include_optimization, custom_vulns, suppressions)
+    raw = await complete(prompt, model_hint)
+    results = parse_batch(raw, len(segments))
+    still = [i for i, r in enumerate(results) if r is None]
+    if still and len(still) < len(segments):
+        # Recurse on the half/subset that's still missing.
+        sub = [segments[i] for i in still]
+        recovered = await _analyze_subset(
+            sub, complete, include_optimization=include_optimization,
+            model_hint=model_hint, custom_vulns=custom_vulns, suppressions=suppressions,
+        )
+        for pos, idx in enumerate(still):
+            results[idx] = recovered[pos]
+    elif still:  # none parsed at this size -> split and retry each half
+        mid = len(segments) // 2
+        left = await _analyze_subset(
+            segments[:mid], complete, include_optimization=include_optimization,
+            model_hint=model_hint, custom_vulns=custom_vulns, suppressions=suppressions,
+        )
+        right = await _analyze_subset(
+            segments[mid:], complete, include_optimization=include_optimization,
+            model_hint=model_hint, custom_vulns=custom_vulns, suppressions=suppressions,
+        )
+        results = left + right
+    return results
+
+
+async def _recover_missing(
+    segments: list[SegmentData],
+    results: list[AnalysisResult | None],
+    missing: list[int],
+    complete: CompleteFn,
+    *,
+    include_optimization: bool,
+    model_hint: str | None,
+    custom_vulns: list[str] | None,
+    suppressions: list[str] | None,
+) -> list[AnalysisResult | None]:
+    """Re-analyze the missing indices and merge results back by position."""
+    logger.info("recovering %d missing segment(s) from batch", len(missing))
+    sub = [segments[i] for i in missing]
+    recovered = await _analyze_subset(
+        sub, complete, include_optimization=include_optimization,
+        model_hint=model_hint, custom_vulns=custom_vulns, suppressions=suppressions,
+    )
+    for pos, idx in enumerate(missing):
+        if recovered[pos] is not None:
+            results[idx] = recovered[pos]
+    n_ok = sum(1 for i in missing if results[i] is not None)
+    logger.info("recovery: %d/%d segment(s) recovered", n_ok, len(missing))
+    return results
+
+
 async def analyze_batch(
     segments: list[SegmentData],
     complete: CompleteFn,
@@ -462,6 +532,19 @@ async def analyze_batch(
         repair = prompt + "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON object keyed by segment index."
         raw = await complete(repair, model_hint)
         results = parse_batch(raw, len(segments))
+
+    # Recovery: some segments can be missing while others parsed fine — typically
+    # the model truncated its output, so the last indices never appeared. Re-run
+    # just those, splitting smaller each pass (half-size sub-batches, then
+    # single-segment, which is the most reliable). Costs extra requests only for
+    # the segments that actually failed, not the whole batch.
+    missing = [i for i, r in enumerate(results) if r is None]
+    if missing and len(missing) < len(segments):
+        results = await _recover_missing(
+            segments, results, missing, complete,
+            include_optimization=include_optimization, model_hint=model_hint,
+            custom_vulns=custom_vulns, suppressions=suppressions,
+        )
 
     out: list[AnalysisResult | None] = []
     for seg, res in zip(segments, results):

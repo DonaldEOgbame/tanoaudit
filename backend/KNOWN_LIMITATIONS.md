@@ -123,10 +123,17 @@ environmental (needs an account/key) or a deliberate, low-risk choice.
   orchestrator now packs segments into batches under `ANALYSIS_BATCH_TOKENS`
   (default 6000) and sends one request per batch — `analyze_batch` returns
   results keyed by segment index, preserving per-segment line numbers, events,
-  counters, scores, and per-segment salvage (a missing/garbled index drops only
-  that segment). A batch of one reuses the single-segment path. Set the budget to
-  0 to disable. 🟡 *Bigger prompts can slightly dilute per-segment attention; the
-  detection benchmark is the way to tune the budget vs. quality trade-off.*
+  counters, scores, and per-segment salvage. A batch of one reuses the
+  single-segment path. Set the budget to 0 to disable.
+- ✅ **Truncated-batch recovery.** When the model truncates its JSON (some
+  segment indices missing while others parsed), the missing segments are
+  *re-analyzed* — as a smaller sub-batch, recursively halving down to the
+  single-segment path (most reliable) — instead of being dropped. Extra requests
+  are spent only on the segments that failed. The output cap is also raised
+  (`MAX_ANALYSIS_TOKENS=16384`) to truncate less often. A real scan of a 76-seg
+  repo on a weak free model lost 8 segments before this; recovery reclaims them.
+  🟡 *Bigger prompts can still slightly dilute per-segment attention; tune
+  `ANALYSIS_BATCH_TOKENS` with the detection benchmark.*
 - ✅ **Detection-quality benchmark exists.** `tests/fixtures/vuln_corpus/` is a
   planted-issue corpus (15 seeded issues across security/optimization/stub, each
   tagged `PLANTED: <engine>/<slug>`), with a harness (`tests/benchmark/harness.py`)

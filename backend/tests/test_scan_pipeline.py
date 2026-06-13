@@ -401,6 +401,36 @@ async def test_analyze_batch_single_segment_uses_single_path():
     assert len(out[0].security) == 1             # SQLi detected
 
 
+async def test_analyze_batch_recovers_truncated_segments():
+    """When the model truncates a batch (some indices missing), the missing
+    segments are recovered by re-analysis — not silently dropped."""
+    import json
+    from app.services.analysis import analyze_batch
+    from app.services.segmentation import SegmentData
+
+    segs = [SegmentData(f"f{i}.py", "python", 1, 3, f"x = {i}", f"h{i}") for i in range(4)]
+    clean = {"security": [], "optimizations": [], "stubs": [],
+             "segment_scores": {"security_risk": 0, "optimization_score": 100, "completeness_score": 100}}
+    calls = {"n": 0}
+
+    async def truncating(prompt, model_hint):
+        calls["n"] += 1
+        import re
+        blocks = re.findall(r"### SEGMENT (\d+)", prompt)
+        idxs = [int(b) for b in blocks]
+        # First call (the full batch of 4): only return indices 0,1 — simulate
+        # the model truncating its JSON before segments 2,3.
+        if calls["n"] == 1 and len(idxs) == 4:
+            return json.dumps({"results": {"0": clean, "1": clean}})
+        # Recovery calls: answer everything asked.
+        return json.dumps({"results": {str(i): clean for i in range(len(idxs))}})
+
+    out = await analyze_batch(segs, truncating)
+    assert len(out) == 4
+    assert all(r is not None for r in out)       # all 4 recovered, none dropped
+    assert calls["n"] >= 2                        # the recovery actually ran
+
+
 async def test_create_scan_validation(auth):
     client, headers, _ = auth
     # url type without source_url -> 400

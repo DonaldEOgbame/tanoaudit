@@ -13,10 +13,11 @@ import httpx
 from app.core.config import settings
 
 SEGMENT_TIMEOUT_S = 30.0
-# Cap on analysis JSON output. Without an explicit cap, large segments could be
-# truncated mid-JSON (the whole segment then fails to parse and its findings are
-# lost). Generous enough for many findings per segment.
-MAX_ANALYSIS_TOKENS = 8192
+# Cap on analysis JSON output. Set generously: a batch covers many segments, and
+# if the model truncates its JSON the trailing segments come back unparseable
+# (recovered by re-analysis, but cheaper to avoid). Models clamp to their own
+# max if this exceeds it.
+MAX_ANALYSIS_TOKENS = 16384
 
 
 class ProviderError(Exception):
