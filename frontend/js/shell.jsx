@@ -35,7 +35,19 @@
     { section: "Learning Hub", icon: "book", page: "learning" },
   ];
 
-  function Sidebar({ page, nav, collapsed, setCollapsed, onNewScan, onCmd, openSettings, demoState }) {
+  function displayName(user) {
+    if (!user) return "Alex Rivera";
+    return user.display_name || user.full_name || (user.email ? user.email.split("@")[0] : "Account");
+  }
+  function userInitials(user) {
+    const name = displayName(user);
+    const parts = name.trim().split(/\s+/);
+    const a = parts[0] ? parts[0][0] : "A";
+    const b = parts.length > 1 ? parts[parts.length - 1][0] : (parts[0] && parts[0][1] ? parts[0][1] : "");
+    return (a + b).toUpperCase();
+  }
+
+  function Sidebar({ page, nav, collapsed, setCollapsed, onNewScan, onCmd, openSettings, demoState, user, onLogout }) {
     const [profileOpen, setProfileOpen] = useState(false);
     const scans = window.VS_SCANS;
 
@@ -100,20 +112,20 @@
       // Footer profile
       h("div", { className: "sb-foot" },
         h("button", { className: "sb-item", style: { padding: collapsed ? "6px 4px" : "7px 8px" }, onClick: () => setProfileOpen((v) => !v) },
-          h(Avatar, { initials: "AR", color: "var(--accent)", size: 26 }),
+          h(Avatar, { initials: userInitials(user), color: "var(--accent)", size: 26 }),
           !collapsed && h("div", { style: { flex: 1, minWidth: 0, textAlign: "left" } },
-            h("div", { style: { fontSize: 12.5, fontWeight: 600, color: "var(--text-1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, "Alex Rivera"),
-            h("div", { style: { fontSize: 11, color: "var(--text-3)" } }, "Pro plan"),
+            h("div", { style: { fontSize: 12.5, fontWeight: 600, color: "var(--text-1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, displayName(user)),
+            h("div", { style: { fontSize: 11, color: "var(--text-3)" } }, (user && user.organization) || "Pro plan"),
           ),
           !collapsed && h(Icons.chevR, { size: 14, style: { color: "var(--text-3)" } }),
         ),
-        profileOpen && h(ProfilePopover, { onClose: () => setProfileOpen(false), openSettings, collapsed }),
+        profileOpen && h(ProfilePopover, { onClose: () => setProfileOpen(false), openSettings, collapsed, user, onLogout }),
       ),
     );
   }
   window.Sidebar = Sidebar;
 
-  function ProfilePopover({ onClose, openSettings, collapsed }) {
+  function ProfilePopover({ onClose, openSettings, collapsed, user, onLogout }) {
     const ref = useRef();
     useEffect(() => {
       const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
@@ -129,15 +141,15 @@
     ];
     return h("div", { ref, className: "popover", style: { bottom: "calc(100% + 6px)", left: 8, right: collapsed ? "auto" : 8, width: collapsed ? 220 : "auto" } },
       h("div", { style: { padding: "8px 10px 6px" } },
-        h("div", { style: { fontSize: 12.5, fontWeight: 600 } }, "Alex Rivera"),
-        h("div", { style: { fontSize: 11.5, color: "var(--text-3)" } }, "alex@acme.dev"),
+        h("div", { style: { fontSize: 12.5, fontWeight: 600 } }, displayName(user)),
+        h("div", { style: { fontSize: 11.5, color: "var(--text-3)" } }, (user && user.email) || "alex@acme.dev"),
       ),
       h("div", { className: "menu-sep" }),
       items.map((it) =>
         h("button", { key: it.label, className: "menu-item", onClick: () => { onClose(); openSettings(it.sec); } },
           h(Icons[it.icon], { size: 15, style: { color: "var(--text-2)" } }), it.label)),
       h("div", { className: "menu-sep" }),
-      h("button", { className: "menu-item", onClick: onClose, style: { color: "var(--sev-critical)" } },
+      h("button", { className: "menu-item", onClick: () => { onClose(); if (onLogout) onLogout(); }, style: { color: "var(--sev-critical)" } },
         h(Icons.logout, { size: 15 }), "Log out"),
     );
   }

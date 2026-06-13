@@ -40,7 +40,7 @@
     html.style.setProperty("--density-pad", t.density === "compact" ? "0.85" : t.density === "comfy" ? "1.08" : "1");
   }
 
-  function AppInner() {
+  function AppInner({ user, onLogout }) {
     const [t, setTweak] = window.useTweaks(TWEAK_DEFAULTS);
     const [page, setPage] = useState("dashboard");
     const [pageKey, setPageKey] = useState(0);
@@ -84,7 +84,7 @@
 
     let body;
     switch (page) {
-      case "dashboard": body = h(Dashboard, { demoState, nav, onNewScan: () => setScanModal(true), onSample: () => { setDemoOverride("returning"); nav("report"); } }); break;
+      case "dashboard": body = h(Dashboard, { demoState, nav, user, onNewScan: () => setScanModal(true), onSample: () => { setDemoOverride("returning"); nav("report"); } }); break;
       case "scans":
       case "report": body = h(ScanReport, { nav, toast, justScanned }); break;
       case "watchlist": body = h(WatchlistPage, { toast, nav }); break;
@@ -93,13 +93,13 @@
       case "plans": body = h(PlansPage, { toast }); break;
       case "integrations": body = h(IntegrationsPage, { toast }); break;
       case "learning": body = h(LearningPage, null); break;
-      default: body = h(Dashboard, { demoState, nav, onNewScan: () => setScanModal(true), onSample: () => nav("report") });
+      default: body = h(Dashboard, { demoState, nav, user, onNewScan: () => setScanModal(true), onSample: () => nav("report") });
     }
 
     const titles = { dashboard: "Dashboard", scans: "Scans", report: "Scan Report", watchlist: "Watchlist", reports: "Reports", custom: "Custom Vulnerabilities", plans: "Optimization Plans", integrations: "Integrations", learning: "Learning Hub" };
 
     return h("div", { className: "vs-app" },
-      h(Sidebar, { page, nav, collapsed, setCollapsed, onNewScan: () => setScanModal(true), onCmd: () => setCmdOpen(true), openSettings: (s) => setSettings(s || "general"), demoState }),
+      h(Sidebar, { page, nav, collapsed, setCollapsed, onNewScan: () => setScanModal(true), onCmd: () => setCmdOpen(true), openSettings: (s) => setSettings(s || "general"), demoState, user, onLogout }),
       h("div", { className: "vs-main" },
         // top bar
         h("div", { className: "vs-topbar" },
@@ -135,8 +135,45 @@
     );
   }
 
+  function Gate() {
+    const API = window.AkiraAPI;
+    // "loading" until we know whether the stored token resolves a user.
+    const [status, setStatus] = useState(API && API.auth.isAuthed() ? "loading" : "anon");
+    const [user, setUser] = useState(null);
+
+    async function loadUser() {
+      try {
+        const me = await API.auth.me();
+        setUser(me);
+        setStatus("authed");
+      } catch (e) {
+        // Token missing/expired/invalid — fall back to the auth screen.
+        if (API) API.tokens.clear();
+        setStatus("anon");
+      }
+    }
+
+    useEffect(() => {
+      if (status === "loading") loadUser();
+    }, []);
+
+    async function onLogout() {
+      try { await API.auth.logout(); } catch (e) { /* ignore */ }
+      setUser(null);
+      setStatus("anon");
+    }
+
+    if (status === "loading") {
+      return h("div", { style: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-app)", color: "var(--text-3)", fontSize: 13 } }, "Loading…");
+    }
+    if (status !== "authed") {
+      return h(window.AuthScreen, { onAuthed: () => { setStatus("loading"); loadUser(); } });
+    }
+    return h(AppInner, { user, onLogout });
+  }
+
   function App() {
-    return h(window.ToastProvider, null, h(AppInner, null));
+    return h(window.ToastProvider, null, h(Gate, null));
   }
   window.VaultApp = App;
 })();

@@ -30,16 +30,21 @@
     { label: "Low", n: 12, color: "var(--sev-low)" },
   ];
 
-  function Dashboard({ demoState, nav, onNewScan, onSample }) {
+  function Dashboard({ demoState, nav, onNewScan, onSample, user }) {
     if (demoState === "first-run") return h(FirstRun, { onNewScan, onSample });
 
+    const firstName = (() => {
+      if (!user) return "Alex";
+      const n = user.display_name || user.full_name || (user.email ? user.email.split("@")[0] : "");
+      return n ? n.trim().split(/\s+/)[0] : "there";
+    })();
     const scans = window.VS_SCANS;
     const activity = window.VS_ACTIVITY;
     const totalCrit = 7;
     return h("div", { className: "vs-page-pad vs-page-enter" },
       h("div", { style: { display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 22, flexWrap: "wrap", gap: 12 } },
         h("div", null,
-          h("h1", { style: { fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em" } }, "Welcome back, Alex"),
+          h("h1", { style: { fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em" } }, "Welcome back, " + firstName),
           h("p", { style: { color: "var(--text-2)", fontSize: 13.5, marginTop: 2 } }, "Here's the security posture across your repositories."),
         ),
         h("button", { className: "btn btn-primary btn-lg", onClick: onNewScan }, h(Icons.plus, { size: 17, sw: 2.2 }), "New Scan"),

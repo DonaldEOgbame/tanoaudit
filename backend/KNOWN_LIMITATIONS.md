@@ -29,6 +29,25 @@ environmental (needs an account/key) or a deliberate, low-risk choice.
   5.x↔8.x). *Bump deliberately, re-run the suite, repin.*
 - 🟢 **Session location is null.** No GeoIP enrichment; needs a GeoIP DB.
 
+## Frontend ↔ backend wiring (in progress)
+
+The frontend began as a pure prototype on demo globals (`window.VS_*`). Wiring it
+to the live API is underway, **foundation-first**:
+
+- ✅ **API client** (`frontend/js/api.js`, `window.AkiraAPI`): resolves the base URL
+  (`?api=` → `<meta name="akira-api">` → `http://localhost:8000/api/v1`), unwraps the
+  `{data, error}` envelope, stores the JWT pair in `localStorage`, and does a single
+  transparent refresh-and-retry on 401. CORS: added `:8765`/`127.0.0.1:8765` (the
+  static-server origin) to `CORS_ORIGINS` in `.env`.
+- ✅ **Auth gate** (`frontend/js/auth-screen.jsx` + `app.jsx` `Gate`): login/register
+  UI wired to `/auth/register`, `/auth/login` (incl. the `totp_required` second-factor
+  branch), and `/profile`. App is gated behind a real session; profile name/initials/
+  email and the dashboard greeting now come from the authenticated user. Logout clears
+  tokens and re-gates. Verified end-to-end via headless Chrome against a live backend.
+- 🟡 **Everything else is still demo-data.** Dashboard stats/charts, scans, reports,
+  findings, watchlist, plans, custom vulns, library, live-scan WS, chat, settings
+  persistence — all still read `window.VS_*`. These are the next wiring slices.
+
 ## Post-launch feature additions (this session)
 
 - ✅ **Email OTP 2FA** added *alongside* authenticator TOTP. Users pick the active
