@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     # for orphaned caches, swept by the worker.
     file_cache_ttl_days: int = 7
 
+    # Segment batching: how many input tokens of code to pack into one analysis
+    # request. Larger = fewer requests (key for tight provider rate limits, e.g.
+    # Gemini free tier's 25 req/day) but bigger prompts. Set to 0 to disable
+    # batching (one request per segment).
+    analysis_batch_tokens: int = 6000
+
     # LLM model IDs per provider (override to track provider releases).
     # `gemini-flash-latest` works on the free tier; `gemini-2.0-flash` has had
     # free-tier quota zeroed (limit: 0) — override via GEMINI_MODEL as needed.

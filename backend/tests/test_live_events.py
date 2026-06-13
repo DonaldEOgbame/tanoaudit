@@ -15,14 +15,25 @@ async def _current_user_id(client, headers):
     return r.json()["data"]["id"]
 
 
+def _sqli_result(code):
+    if "db.raw" in code or "SELECT * FROM" in code:
+        return {"security": [{"category": "Injection", "severity": "Critical",
+                "confidence": "High", "line_start": 1, "line_end": 2,
+                "code_snippet": "db.raw", "explanation": "x", "fix_summary": "y",
+                "fix_snippet": "z", "cwe_id": "CWE-89", "owasp_ref": "A03:2021"}],
+                "optimizations": [], "stubs": [],
+                "segment_scores": {"security_risk": 90, "optimization_score": 80, "completeness_score": 100}}
+    return {"security": [], "optimizations": [], "stubs": [],
+            "segment_scores": {"security_risk": 0, "optimization_score": 100, "completeness_score": 100}}
+
+
 async def flag_sqli(prompt, model_hint):
-    if "db.raw" in prompt or "SELECT * FROM" in prompt:
-        return ('{"security": [{"category": "Injection", "severity": "Critical",'
-                ' "confidence": "High", "line_start": 1, "line_end": 2,'
-                ' "code_snippet": "db.raw", "explanation": "x", "fix_summary": "y",'
-                ' "fix_snippet": "z", "cwe_id": "CWE-89", "owasp_ref": "A03:2021"}],'
-                ' "optimizations": [], "segment_scores": {"security_risk": 90, "optimization_score": 80}}')
-    return '{"security": [], "optimizations": [], "segment_scores": {"security_risk": 0, "optimization_score": 100}}'
+    import json as _json
+    import re as _re
+    if "### SEGMENT 0" in prompt:
+        blocks = _re.findall(r"### SEGMENT (\d+).*?```\n(.*?)\n```", prompt, _re.DOTALL)
+        return _json.dumps({"results": {i: _sqli_result(code) for i, code in blocks}})
+    return _json.dumps(_sqli_result(prompt))
 
 
 async def _make_scan(client, headers) -> str:

@@ -13,6 +13,7 @@ import uuid
 
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.core.database import SessionLocal, utcnow
 from app.models.scan import (
     ENGINE_OPTIMIZATION,
@@ -28,7 +29,7 @@ from app.models.scan import (
     Segment,
 )
 from app.schemas.scan import FindingOut
-from app.services.analysis import AnalysisResult, CompleteFn, analyze_segment
+from app.services.analysis import AnalysisResult, CompleteFn
 from app.services.normalization import normalize_label
 from app.services import ingestion, scan_events as ev, scoring
 from app.services.router_factory import build_router_for_scan
@@ -281,50 +282,66 @@ async def run_scan(
         total = len(segments) or 1
         started = utcnow()
 
+        # Group segments into batches so we make far fewer LLM requests (one per
+        # batch instead of one per segment) — essential under tight provider
+        # rate limits. batch_tokens=0 disables batching (one segment per batch).
+        from app.services.analysis import analyze_batch, batch_segments
+
+        batch_tokens = settings.analysis_batch_tokens
+        if batch_tokens and batch_tokens > 0:
+            batches = batch_segments(segments, batch_tokens)
+        else:
+            batches = [[s] for s in segments]
+        logger.info("scan %s: %d segments in %d batch(es)", scan_id, len(segments), len(batches))
+
         async with SessionLocal() as db:
             scan = await db.get(Scan, scan_id)
-            for idx, seg in enumerate(segments, start=1):
-                await _await_resume_or_cancel(scan_id)  # honor pause/cancel
-                db.add(Segment(
-                    scan_id=scan_id, file_path=seg.file_path, language=seg.language,
-                    line_start=seg.line_start, line_end=seg.line_end,
-                    content_hash=seg.content_hash, analyzed=False,
-                ))
-                result = await analyze_segment(
-                    seg, complete,
+            idx = 0
+            for batch in batches:
+                await _await_resume_or_cancel(scan_id)  # honor pause/cancel per batch
+                # One LLM call for the whole batch.
+                batch_results = await analyze_batch(
+                    batch, complete,
                     include_optimization=scan.include_optimization,
                     custom_vulns=custom_targets,
                     suppressions=suppressions,
                 )
                 await _drain_router_events(scan_id, router)
-                if result is not None:
-                    analyzed += 1
-                    opt_scores.append(result.segment_scores.optimization_score)
-                    for finding in _result_to_findings(
-                        scan_id, seg, result, sec_counter, opt_counter, model_hint,
-                        stub_counter=stub_counter, intentional_hashes=intentional_hashes,
-                    ):
-                        db.add(finding)
-                        await db.flush()
-                        await ev.bus.publish(
-                            scan_id, ev.FINDING_DISCOVERED,
-                            FindingOut.model_validate(finding).model_dump(mode="json"),
-                        )
-                else:
-                    # Segment dropped (unparseable even after the repair retry):
-                    # its findings are lost. Track it so the scan can surface a
-                    # recall-miss count instead of failing silently.
-                    unparsed += 1
+                for seg, result in zip(batch, batch_results):
+                    idx += 1
+                    db.add(Segment(
+                        scan_id=scan_id, file_path=seg.file_path, language=seg.language,
+                        line_start=seg.line_start, line_end=seg.line_end,
+                        content_hash=seg.content_hash, analyzed=result is not None,
+                    ))
+                    if result is not None:
+                        analyzed += 1
+                        opt_scores.append(result.segment_scores.optimization_score)
+                        for finding in _result_to_findings(
+                            scan_id, seg, result, sec_counter, opt_counter, model_hint,
+                            stub_counter=stub_counter, intentional_hashes=intentional_hashes,
+                        ):
+                            db.add(finding)
+                            await db.flush()
+                            await ev.bus.publish(
+                                scan_id, ev.FINDING_DISCOVERED,
+                                FindingOut.model_validate(finding).model_dump(mode="json"),
+                            )
+                    else:
+                        # Segment dropped (missing/unparseable in the batch): its
+                        # findings are lost. Track it so the scan can surface a
+                        # recall-miss count instead of failing silently.
+                        unparsed += 1
 
-                await ev.bus.publish(scan_id, ev.SEGMENT_COMPLETED, {
-                    "analyzed": analyzed, "total": len(segments),
-                })
-                percent = round(idx / total * 100)
-                elapsed = (utcnow() - started).total_seconds()
-                eta = round(elapsed / idx * (total - idx)) if idx else None
-                await ev.bus.publish(scan_id, ev.SCAN_PROGRESS, {
-                    "percent": percent, "elapsed": round(elapsed), "eta": eta,
-                })
+                    await ev.bus.publish(scan_id, ev.SEGMENT_COMPLETED, {
+                        "analyzed": analyzed, "total": len(segments),
+                    })
+                    percent = round(idx / total * 100)
+                    elapsed = (utcnow() - started).total_seconds()
+                    eta = round(elapsed / idx * (total - idx)) if idx else None
+                    await ev.bus.publish(scan_id, ev.SCAN_PROGRESS, {
+                        "percent": percent, "elapsed": round(elapsed), "eta": eta,
+                    })
             await db.commit()
 
         # Cross-model verification of Criticals (only with >=2 keyed providers).

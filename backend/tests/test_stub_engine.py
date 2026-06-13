@@ -33,27 +33,32 @@ async def _current_user_id(client, headers) -> str:
 # A fake provider that flags an empty auth middleware as a Critical Incomplete
 # stub whenever it sees the planted marker, and otherwise reports clean.
 def _make_fake_complete(stub_code="next()"):
+    def _stub_hit():
+        return {
+            "security": [], "optimizations": [],
+            "stubs": [{
+                "category": "Incomplete", "severity": "Critical", "confidence": "High",
+                "line_start": 1, "line_end": 3, "code_snippet": stub_code,
+                "explanation": "Auth middleware does nothing and calls next().",
+                "completion_suggestion": "verify a JWT and reject missing/invalid tokens",
+                "risk_if_shipped": "Authentication is completely bypassed.",
+            }],
+            "segment_scores": {"security_risk": 0, "optimization_score": 100, "completeness_score": 0},
+        }
+
+    def _clean():
+        return {"security": [], "optimizations": [], "stubs": [],
+                "segment_scores": {"security_risk": 0, "optimization_score": 100, "completeness_score": 100}}
+
     async def fake_complete(prompt: str, model_hint):
-        if "TODO: implement auth" in prompt:
-            return json.dumps({
-                "security": [], "optimizations": [],
-                "stubs": [{
-                    "category": "Incomplete", "severity": "Critical", "confidence": "High",
-                    "line_start": 1, "line_end": 3, "code_snippet": stub_code,
-                    "explanation": "Auth middleware does nothing and calls next().",
-                    "completion_suggestion": "verify a JWT and reject missing/invalid tokens",
-                    "risk_if_shipped": "Authentication is completely bypassed.",
-                }],
-                "segment_scores": {
-                    "security_risk": 0, "optimization_score": 100, "completeness_score": 0,
-                },
-            })
-        return json.dumps({
-            "security": [], "optimizations": [], "stubs": [],
-            "segment_scores": {
-                "security_risk": 0, "optimization_score": 100, "completeness_score": 100,
-            },
-        })
+        import re as _re
+        # Batch prompt: result per "### SEGMENT i ... ```code```" block.
+        if "### SEGMENT 0" in prompt:
+            blocks = _re.findall(r"### SEGMENT (\d+).*?```\n(.*?)\n```", prompt, _re.DOTALL)
+            results = {i: (_stub_hit() if "TODO: implement auth" in code else _clean())
+                       for i, code in blocks}
+            return json.dumps({"results": results})
+        return json.dumps(_stub_hit() if "TODO: implement auth" in prompt else _clean())
     return fake_complete
 
 

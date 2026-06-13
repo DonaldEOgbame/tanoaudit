@@ -20,16 +20,33 @@ async def _current_user_id(client, headers) -> str:
 
 
 # A fake provider that flags SQL injection whenever it sees raw query building.
+def _seg_result(has_sqli: bool) -> dict:
+    if has_sqli:
+        return {"security": [{"category": "Injection", "subcategory": "SQL Injection",
+            "severity": "Critical", "confidence": "High", "line_start": 2, "line_end": 3,
+            "code_snippet": "db.raw(sql)", "explanation": "raw SQL", "fix_summary": "parameterize",
+            "fix_snippet": "db('t').where(...)", "cwe_id": "CWE-89", "owasp_ref": "A03:2021"}],
+            "optimizations": [], "stubs": [],
+            "segment_scores": {"security_risk": 90, "optimization_score": 70, "completeness_score": 100}}
+    return {"security": [], "optimizations": [], "stubs": [],
+            "segment_scores": {"security_risk": 0, "optimization_score": 100, "completeness_score": 100}}
+
+
+def _has_sqli(text: str) -> bool:
+    return "db.raw" in text or 'f"SELECT' in text or "SELECT * FROM" in text
+
+
 async def fake_complete(prompt: str, model_hint):
-    if "db.raw" in prompt or "f\"SELECT" in prompt or "SELECT * FROM" in prompt:
-        return """```json
-        {"security": [{"category": "Injection", "subcategory": "SQL Injection",
-          "severity": "Critical", "confidence": "High", "line_start": 2, "line_end": 3,
-          "code_snippet": "db.raw(sql)", "explanation": "raw SQL", "fix_summary": "parameterize",
-          "fix_snippet": "db('t').where(...)", "cwe_id": "CWE-89", "owasp_ref": "A03:2021"}],
-         "optimizations": [], "segment_scores": {"security_risk": 90, "optimization_score": 70}}
-        ```"""
-    return '{"security": [], "optimizations": [], "segment_scores": {"security_risk": 0, "optimization_score": 100}}'
+    import json as _json
+    import re as _re
+
+    # Batch prompt: one entry per "### SEGMENT i ... ```<code>```" block.
+    if "### SEGMENT 0" in prompt:
+        blocks = _re.findall(r"### SEGMENT (\d+).*?```\n(.*?)\n```", prompt, _re.DOTALL)
+        results = {i: _seg_result(_has_sqli(code)) for i, code in blocks}
+        return _json.dumps({"results": results})
+    # Single-segment prompt.
+    return _json.dumps(_seg_result(_has_sqli(prompt)))
 
 
 # ---- Unit: ingestion --------------------------------------------------------
@@ -336,6 +353,52 @@ async def test_completers_coerce_null_content():
     from app.services.verification import _parse_confirm
     assert parse_analysis(None) is None
     assert _parse_confirm(None) is None
+
+
+def test_batch_segments_respects_token_budget():
+    from app.services.analysis import batch_segments
+    from app.services.segmentation import SegmentData
+    # Each segment ~25 tokens of content; budget 200 -> a few per batch.
+    segs = [SegmentData(f"f{i}.py", "python", 1, 5, "x = " + "a" * 80, f"h{i}") for i in range(10)]
+    batches = batch_segments(segs, 200)
+    assert len(batches) > 1                      # actually split
+    assert sum(len(b) for b in batches) == 10    # nothing lost
+    assert [s for b in batches for s in b] == segs  # order preserved
+
+
+def test_batch_segments_oversized_segment_is_own_batch():
+    from app.services.analysis import batch_segments
+    from app.services.segmentation import SegmentData
+    big = SegmentData("big.py", "python", 1, 500, "z" * 40000, "h")
+    small = SegmentData("s.py", "python", 1, 2, "x=1", "h2")
+    batches = batch_segments([big, small], 1000)
+    assert [len(b) for b in batches] == [1, 1]   # big alone, small alone
+
+
+def test_parse_batch_salvages_per_segment():
+    import json
+    from app.services.analysis import parse_batch
+    raw = json.dumps({"results": {
+        "0": {"security": [], "optimizations": [], "stubs": [],
+              "segment_scores": {"security_risk": 0, "optimization_score": 100, "completeness_score": 100}},
+        # index 1 missing entirely -> None; index 2 malformed but salvageable
+        "2": {"security": [{"severity": "High"}], "optimizations": "not-a-list"},
+    }})
+    out = parse_batch(raw, 3)
+    assert out[0] is not None
+    assert out[1] is None                        # missing -> None, not a crash
+    assert out[2] is not None and len(out[2].security) == 1
+    assert out[2].optimizations == []            # bad array salvaged to empty
+
+
+async def test_analyze_batch_single_segment_uses_single_path():
+    # A batch of one should behave exactly like analyze_segment.
+    from app.services.analysis import analyze_batch
+    from app.services.segmentation import SegmentData
+    seg = SegmentData("a.js", "js", 1, 4, "const sql = `SELECT * FROM t`;", "h")
+    out = await analyze_batch([seg], fake_complete)
+    assert len(out) == 1 and out[0] is not None
+    assert len(out[0].security) == 1             # SQLi detected
 
 
 async def test_create_scan_validation(auth):

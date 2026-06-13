@@ -117,6 +117,16 @@ environmental (needs an account/key) or a deliberate, low-risk choice.
 - 🟢 **Confidence noise-floor filter.** Optimization/stub findings that are both
   Low-confidence *and* Low/Info-severity are dropped (logged). Security findings
   are never filtered — a low-confidence critical still warrants a look.
+- ✅ **Segment batching cuts request count.** Analysis used to make one LLM
+  request per segment, so a mid-size repo (e.g. 76 segments) blew straight
+  through tight free-tier limits (Gemini free tier = 25 requests/day). The
+  orchestrator now packs segments into batches under `ANALYSIS_BATCH_TOKENS`
+  (default 6000) and sends one request per batch — `analyze_batch` returns
+  results keyed by segment index, preserving per-segment line numbers, events,
+  counters, scores, and per-segment salvage (a missing/garbled index drops only
+  that segment). A batch of one reuses the single-segment path. Set the budget to
+  0 to disable. 🟡 *Bigger prompts can slightly dilute per-segment attention; the
+  detection benchmark is the way to tune the budget vs. quality trade-off.*
 - ✅ **Detection-quality benchmark exists.** `tests/fixtures/vuln_corpus/` is a
   planted-issue corpus (15 seeded issues across security/optimization/stub, each
   tagged `PLANTED: <engine>/<slug>`), with a harness (`tests/benchmark/harness.py`)
