@@ -5,6 +5,16 @@
   const h = React.createElement;
   const Icons = window.Icons;
   const { SevBadge, Tag, CodeBlock } = window;
+  const API = window.AkiraAPI;
+
+  // Line-range label from the normalized finding shape (start + count).
+  function lineRange(f) {
+    const start = f.start || (Array.isArray(f.lines) ? f.lines[0] : null);
+    if (!start) return "";
+    const count = Array.isArray(f.lines) ? (f.lines[1] - f.lines[0] + 1) : (f.lines || 1);
+    const end = start + Math.max(count, 1) - 1;
+    return end > start ? "L" + start + "–" + end : "L" + start;
+  }
 
   function FindingCard({ f, idx, selected, onSelect, onSuppress, toast, nav }) {
     const [fpOpen, setFpOpen] = useState(false);
@@ -13,21 +23,81 @@
     const [fixState, setFixState] = useState("idle"); // idle | loading | done
     const [fixText, setFixText] = useState("");
     const [copied, setCopied] = useState(false);
-    const [intentional, setIntentional] = useState(false);
+    const [intentional, setIntentional] = useState(!!(f._raw && f._raw.intentional));
+    const [issueState, setIssueState] = useState("idle"); // idle | loading
+    const fixCtl = useRef(null);
 
+    const realId = f._raw && f._raw.id;
     const isStub = f.type === "stub";
+
+    // Abort any in-flight fix stream when the card unmounts.
+    useEffect(() => () => { if (fixCtl.current && fixCtl.current.abort) fixCtl.current.abort(); }, []);
     const FULL_FIX = isStub
       ? "Completing the stub in " + f.file + "…\n\n1. " + f.fixSummary + "\n2. Implemented the behavior the function name and signature imply.\n3. Added the missing validation / error paths.\n\nThe completed implementation is shown in the diff panel. Review the assumptions before merging."
       : "Applying fix to " + f.file + "…\n\n1. " + f.fixSummary + "\n2. Added input validation guard upstream.\n3. Updated unit tests: " + f.file.replace("src/", "test/").replace(".js", ".test.js") + "\n\nThe corrected implementation is shown in the diff panel. This change is backwards-compatible and requires no migration.";
 
+    // Real finding: stream the fix/implementation from the backend. Demo
+    // finding (no _raw id): keep the canned typewriter so the showcase renders.
     function genFix() {
       setFixState("loading"); setFixText("");
+      if (realId && API) {
+        let acc = "";
+        const gen = isStub ? API.findings.generateImplementation : API.findings.generateFix;
+        const ctl = gen.call(API.findings, realId, (evt) => {
+          if (evt && typeof evt === "object") {
+            if (evt.delta) { acc += evt.delta; setFixText(acc); }
+            if (evt.done) setFixState("done");
+            if (evt.error) { setFixText("⚠️ " + evt.error); setFixState("done"); }
+          } else if (typeof evt === "string") {
+            acc += evt; setFixText(acc);
+          }
+        });
+        fixCtl.current = ctl;
+        ctl.promise
+          .then(() => setFixState((s) => (s === "loading" ? "done" : s)))
+          .catch((e) => { setFixText((t) => t || ("⚠️ " + ((e && e.message) || "Generation failed."))); setFixState("done"); });
+        return;
+      }
       let i = 0;
       const iv = setInterval(() => {
         i += Math.ceil(Math.random() * 4 + 2);
         setFixText(FULL_FIX.slice(0, i));
         if (i >= FULL_FIX.length) { clearInterval(iv); setFixState("done"); }
       }, 30);
+    }
+
+    // Persist "mark intentional" for real stub findings; demo stubs just toggle.
+    function markIntentional() {
+      setIntentional(true);
+      toast({ kind: "success", msg: "Marked intentional — excluded from completeness score" });
+      setFpOpen(false);
+      if (realId && API) {
+        API.findings.markIntentional(realId, { reason: fpReason || "Marked from report" }).catch((e) => {
+          setIntentional(false);
+          toast({ kind: "error", msg: "Couldn't mark intentional: " + ((e && e.message) || "error") });
+        });
+      }
+    }
+
+    // Create a GitHub issue for a real finding; demo findings just confirm.
+    function createIssue() {
+      if (!realId || !API) {
+        toast({ kind: "success", title: "GitHub issue created", msg: f.name });
+        return;
+      }
+      setIssueState("loading");
+      API.github.createIssue(realId)
+        .then((res) => {
+          const num = res && (res.number || res.issue_number);
+          const url = res && (res.url || res.html_url);
+          toast({ kind: "success", title: "GitHub issue created", msg: (num ? "#" + num + " · " : "") + f.name });
+          if (url) window.open(url, "_blank");
+        })
+        .catch((e) => {
+          const msg = (e && e.message) || "Could not create issue";
+          toast({ kind: "error", title: "GitHub issue failed", msg: /connect|auth|token/i.test(msg) ? "Connect GitHub in Integrations first." : msg });
+        })
+        .finally(() => setIssueState("idle"));
     }
 
     function suppress() {
@@ -56,15 +126,21 @@
             intentional && h("span", { className: "badge", style: { background: "var(--sev-info-bg)", color: "var(--text-2)" } }, h(Icons.check, { size: 11 }), "Intentional"),
 ),
           h("div", { style: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" } },
-            h(Tag, null, "L" + f.lines[0] + "–" + f.lines[1]),
+            lineRange(f) && h(Tag, null, lineRange(f)),
             isStub && f.stubCategory && h("span", { className: "badge", style: { background: "var(--sev-stub-bg)", color: "var(--sev-stub)" } }, f.stubCategory),
             !isStub && h(Tag, null, f.category),
             f.cwe !== "—" && h(Tag, null, f.cwe),
             f.owasp && f.owasp !== "—" && h(Tag, null, f.owasp),
             h(Tag, { color: "var(--text-2)" }, f.model),
             f.verified && h("span", { className: "badge", style: { background: "var(--sev-clean-bg)", color: "var(--sev-clean)" } }, h(Icons.shieldCheck, { size: 12 }), "Verified by 2 models"),
-            h("span", { style: { fontSize: 11, color: "var(--text-3)" } }, f.confidence + " confidence"),
-            isOpt && f.impact && h("span", { className: "badge", style: { background: "var(--sev-opt-bg)", color: "var(--sev-opt)" } }, f.impact + " impact")),
+            h("span", { style: { fontSize: 11, color: "var(--text-3)" } }, f.confidence + " confidence")),
+          // Optimization impact is a full sentence (e.g. "Reduces network calls by
+          // 50%…"), so it gets its own wrapping callout — not a one-line badge,
+          // which clipped/overflowed the text.
+          isOpt && f.impact && h("div", { style: { display: "flex", gap: 8, margin: "10px 0 0", padding: "9px 12px", borderRadius: "var(--r-md)", background: "var(--sev-opt-bg)", border: "1px solid color-mix(in srgb, var(--sev-opt) 30%, transparent)" } },
+            h(Icons.zap || Icons.sparkle, { size: 15, style: { color: "var(--sev-opt)", flexShrink: 0, marginTop: 1 } }),
+            h("span", { style: { fontSize: 12.5, lineHeight: 1.5, color: "var(--text-1)" } },
+              h("strong", { style: { color: "var(--sev-opt)" } }, "Impact: "), f.impact)),
           h("p", { style: { fontSize: 13, lineHeight: 1.55, color: "var(--text-2)", margin: "10px 0 14px", textWrap: "pretty" } },
             f.summary,
             isStub && f.risk && h("span", { style: { display: "block", marginTop: 8, padding: "8px 11px", borderRadius: "var(--r-md)", background: "var(--sev-critical-bg)", color: "var(--text-1)", fontSize: 12.5 } },
@@ -109,7 +185,16 @@
               h("pre", { className: "mono", style: { fontSize: 11.5, lineHeight: 1.6, whiteSpace: "pre-wrap", color: "var(--text-1)" } },
                 fixText, fixState === "loading" && h("span", { className: "term-cursor" })),
               fixState === "done" && h("div", { style: { display: "flex", gap: 8, marginTop: 10 } },
-                h("button", { className: "btn btn-primary btn-sm", onClick: () => toast({ kind: "success", msg: "Fix applied as patch file" }) }, "Download patch"),
+                h("button", { className: "btn btn-primary btn-sm", onClick: () => {
+                  const blob = new Blob([fixText || ""], { type: "text/plain" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  const safe = String(f.id || "finding").replace(/[^a-z0-9_-]+/gi, "-");
+                  a.href = url; a.download = safe + (isStub ? "-implementation.txt" : "-fix.patch");
+                  document.body.appendChild(a); a.click(); a.remove();
+                  setTimeout(() => URL.revokeObjectURL(url), 1000);
+                  toast({ kind: "success", msg: "Patch downloaded" });
+                } }, "Download patch"),
                 h("button", { className: "btn btn-ghost btn-sm", onClick: () => setFixState("idle") }, "Dismiss"))))),
 
         // Footer actions
@@ -123,9 +208,10 @@
               h("textarea", { className: "field", rows: 2, placeholder: "Reason (optional)…", value: fpReason, onChange: (e) => setFpReason(e.target.value), style: { resize: "none", fontSize: 12 } }),
               h("div", { style: { display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" } },
                 h("button", { className: "btn btn-ghost btn-sm", onClick: () => setFpOpen(false) }, "Cancel"),
-                h("button", { className: "btn btn-primary btn-sm", onClick: () => { if (isStub) { setIntentional(true); toast({ kind: "success", msg: "Marked intentional — excluded from completeness score" }); setFpOpen(false); } else { suppress(); } } }, isStub ? "Mark intentional" : "Suppress")))),
+                h("button", { className: "btn btn-primary btn-sm", onClick: () => { if (isStub) { markIntentional(); } else { suppress(); } } }, isStub ? "Mark intentional" : "Suppress")))),
           h("button", { className: "btn btn-ghost btn-sm", onClick: (e) => { e.stopPropagation(); nav("learning"); } }, h(Icons.book, { size: 13 }), "Learn more"),
-          h("button", { className: "btn btn-ghost btn-sm", onClick: (e) => { e.stopPropagation(); toast({ kind: "success", title: "GitHub issue created", msg: "#214 · " + f.name }); } }, h(Icons.github, { size: 13 }), "Create issue"),
+          h("button", { className: "btn btn-ghost btn-sm", disabled: issueState === "loading", onClick: (e) => { e.stopPropagation(); createIssue(); } },
+            issueState === "loading" ? h("div", { className: "spinner", style: { width: 13, height: 13 } }) : h(Icons.github, { size: 13 }), issueState === "loading" ? "Creating…" : "Create issue"),
 
           h("span", { style: { flex: 1 } }),
           h("span", { className: "mono", style: { fontSize: 11, color: "var(--text-3)" } }, f.id, " · est. ", f.effort))));

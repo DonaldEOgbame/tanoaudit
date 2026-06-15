@@ -126,13 +126,17 @@ async def tool_mark_finding_fixed(args: dict) -> str:
         # Allow lookup by internal id or public id.
         finding = await db.get(Finding, finding_id)
         if finding is None:
+            # first(): duplicate rows can share a public_id, so avoid
+            # scalar_one_or_none() which raises MultipleResultsFound.
             finding = (
                 await db.execute(
-                    select(Finding).where(
+                    select(Finding)
+                    .where(
                         Finding.scan_id == audit_id, Finding.public_id == finding_id
                     )
+                    .order_by(Finding.id)
                 )
-            ).scalar_one_or_none()
+            ).scalars().first()
         if finding is None or finding.scan_id != audit_id:
             return "Error: finding not found for this audit."
 

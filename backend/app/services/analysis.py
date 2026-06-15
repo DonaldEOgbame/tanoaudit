@@ -539,7 +539,7 @@ async def analyze_batch(
     # single-segment, which is the most reliable). Costs extra requests only for
     # the segments that actually failed, not the whole batch.
     missing = [i for i, r in enumerate(results) if r is None]
-    if missing and len(missing) < len(segments):
+    if missing:
         results = await _recover_missing(
             segments, results, missing, complete,
             include_optimization=include_optimization, model_hint=model_hint,

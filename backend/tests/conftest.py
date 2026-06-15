@@ -13,8 +13,6 @@ _db_path = os.path.join(tempfile.gettempdir(), "akira_test.db")
 os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{_db_path}")
 os.environ.setdefault("FERNET_KEY", "X43ZaXmyDjfp88SFRC8ISRZMvv8a9XCWobN_PO6tdO4=")
 os.environ.setdefault("JWT_SECRET", "test-secret")
-# Force the in-memory event bus in tests (no Redis dependency).
-os.environ.setdefault("REDIS_URL", "")
 # Disable rate limiting in tests (the in-memory window would accumulate across
 # the many shared-IP login calls).
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")

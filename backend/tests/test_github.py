@@ -304,3 +304,70 @@ async def test_post_scan_creates_issues_above_threshold(auth, monkeypatch):
     # Only the critical (>= high threshold) gets an issue, not the low.
     assert len(created) == 1
     assert "VLN-0001" in created[0]
+
+
+# ---- Sign in with GitHub (auth flow) ----------------------------------------
+@pytest.mark.asyncio
+async def test_github_login_start_not_configured(client):
+    """Without OAuth credentials, /auth/github/start returns a clear 503."""
+    r = await client.get(f"{PREFIX}/auth/github/start")
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "github_not_configured"
+
+
+@pytest.mark.asyncio
+async def test_github_login_creates_user_and_issues_tokens(client, monkeypatch):
+    """A GitHub callback for a new email creates a user and redirects with tokens."""
+    from app.core.config import settings
+    from app.core.security import create_access_token
+
+    monkeypatch.setattr(settings, "github_client_id", "cid")
+    monkeypatch.setattr(settings, "github_client_secret", "csec")
+
+    async def fake_exchange(code, redirect_uri=None):
+        return {"token": "ghp_login", "scopes": "read:user,user:email"}
+
+    async def fake_user(token):
+        return {"login": "newdev", "name": "New Dev", "avatar_url": "http://a/x.png", "email": None}
+
+    async def fake_primary_email(token):
+        return "newdev@example.com"
+
+    monkeypatch.setattr(gh, "exchange_code", fake_exchange)
+    monkeypatch.setattr(gh, "get_user", fake_user)
+    monkeypatch.setattr(gh, "get_primary_email", fake_primary_email)
+
+    state = create_access_token("github_login", purpose="github_login", nonce="n")
+    r = await client.get(
+        f"{PREFIX}/auth/github/callback",
+        params={"code": "abc", "state": state},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert "access_token=" in loc and "refresh_token=" in loc
+    assert "#" in loc  # tokens go in the fragment
+
+    # The user now exists and can be fetched by the issued access token.
+    from urllib.parse import urlparse, parse_qs
+    frag = parse_qs(urlparse(loc).fragment)
+    at = frag["access_token"][0]
+    me = await client.get(f"{PREFIX}/profile", headers={"Authorization": f"Bearer {at}"})
+    assert me.status_code == 200
+    assert me.json()["data"]["email"] == "newdev@example.com"
+
+
+@pytest.mark.asyncio
+async def test_github_login_bad_state_redirects_error(client, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "github_client_id", "cid")
+    monkeypatch.setattr(settings, "github_client_secret", "csec")
+
+    r = await client.get(
+        f"{PREFIX}/auth/github/callback",
+        params={"code": "abc", "state": "not-a-valid-token"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "auth=error" in r.headers["location"]

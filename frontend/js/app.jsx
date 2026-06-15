@@ -73,6 +73,31 @@
       return () => { alive = false; };
     }, [user]);
 
+    // Land back on Integrations after the GitHub OAuth round-trip. The backend
+    // redirects to <frontend>/?github=connected (or ?github=error&message=…);
+    // we route there, toast the result, and strip the params from the URL.
+    useEffect(() => {
+      if (!user) return;
+      let params;
+      try { params = new URLSearchParams(window.location.search); } catch (e) { return; }
+      const gh = params.get("github");
+      if (!gh) return;
+      if (gh === "connected") {
+        const acct = params.get("account");
+        toast({ kind: "success", title: "GitHub connected", msg: acct ? ("Connected as " + acct) : "Your GitHub account is linked." });
+        nav("integrations");
+      } else if (gh === "error") {
+        toast({ kind: "error", title: "GitHub connection failed", msg: params.get("message") || "Authorization was not completed." });
+        nav("integrations");
+      }
+      // Clean the query string so a refresh doesn't re-trigger.
+      try {
+        const url = new URL(window.location.href);
+        ["github", "account", "message"].forEach((k) => url.searchParams.delete(k));
+        window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+      } catch (e) {}
+    }, [user]);
+
     useEffect(() => { applyTheme(t); }, [t.theme, t.mode, t.accent, t.density]);
 
     // Cmd+K
@@ -112,7 +137,11 @@
         setActiveScanId(scan.id);
         setScanning(true);
       } catch (e) {
-        toast({ kind: "error", title: "Couldn't start scan", msg: (e && e.message) || "Please try again." });
+        if (e && e.code === "daily_limit_reached") {
+          toast({ kind: "error", title: "Daily limit reached", msg: (e && e.message) || "You've used all your scans for today." });
+        } else {
+          toast({ kind: "error", title: "Couldn't start scan", msg: (e && e.message) || "Please try again." });
+        }
       }
     }
 
@@ -121,7 +150,7 @@
       setScanId(activeScanId); setActiveScanId(null);
       setPage("report"); setPageKey((k) => k + 1);
       const parts = [];
-      if (summary && summary.security_score != null) parts.push("risk score " + summary.security_score);
+      if (summary && summary.security_score != null) parts.push("security risk " + window.riskFromScore(summary.security_score));
       toast({ kind: "success", title: "Scan complete", msg: scanRepo + (parts.length ? " — " + parts.join(" · ") : "") });
     }
 
@@ -145,9 +174,9 @@
 
     let body;
     switch (page) {
-      case "dashboard": body = h(Dashboard, { demoState, nav, user, onNewScan: () => setScanModal(true), onSample: () => { setDemoOverride("returning"); nav("report"); } }); break;
+      case "dashboard": body = h(Dashboard, { demoState, nav, user, openSettings: (s) => setSettings(s || "general"), onNewScan: () => setScanModal(true), onSample: () => { setDemoOverride("returning"); nav("report"); } }); break;
       case "scans":
-      case "report": body = h(ScanReport, { nav, toast, justScanned, scanId, repo: scanId ? scanRepo : null }); break;
+      case "report": body = h(ScanReport, { nav, toast, justScanned, scanId, repo: scanId ? scanRepo : null, onLoadRepo: setScanRepo }); break;
       case "watchlist": body = h(WatchlistPage, { toast, nav }); break;
       case "reports": body = h(ReportsPage, { toast, nav }); break;
       case "custom": body = h(CustomVulnsPage, { toast }); break;
@@ -224,9 +253,18 @@
 
   function Gate() {
     const API = window.AkiraAPI;
+    // Pick up any tokens / error the GitHub sign-in redirect left in the URL
+    // before we decide the initial status. Runs once at module eval per mount.
+    const redirect = useRef(API ? API.auth.consumeAuthRedirect() : null).current;
     // "loading" until we know whether the stored token resolves a user.
     const [status, setStatus] = useState(API && API.auth.isAuthed() ? "loading" : "anon");
     const [user, setUser] = useState(null);
+    // For anon visitors, show the marketing landing page first; "auth" reveals
+    // the login/register screen. `authMode` seeds it to login or register.
+    // A GitHub sign-in error lands straight on the auth screen with a message.
+    const [view, setView] = useState(redirect && redirect.error ? "auth" : "landing");
+    const [authMode, setAuthMode] = useState("login");
+    const [authError, setAuthError] = useState(redirect && redirect.error ? redirect.error : null);
 
     async function loadUser() {
       try {
@@ -254,7 +292,18 @@
       return h("div", { style: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-app)", color: "var(--text-3)", fontSize: 13 } }, "Loading…");
     }
     if (status !== "authed") {
-      return h(window.AuthScreen, { onAuthed: () => { setStatus("loading"); loadUser(); } });
+      if (view === "landing") {
+        return h(window.LandingPage, {
+          onGetStarted: () => { setAuthMode("register"); setView("auth"); },
+          onLogin: () => { setAuthMode("login"); setView("auth"); },
+        });
+      }
+      return h(window.AuthScreen, {
+        initialMode: authMode,
+        initialError: authError,
+        onBack: () => { setAuthError(null); setView("landing"); },
+        onAuthed: () => { setStatus("loading"); loadUser(); },
+      });
     }
     return h(AppInner, { user, onLogout });
   }

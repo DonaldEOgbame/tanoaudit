@@ -9,7 +9,8 @@
   const h = React.createElement;
   const Icons = window.Icons;
 
-  const FACTS = window.VS_FACTS;
+  // Static fallback facts (used until the backend /fun-facts response arrives).
+  const STATIC_FACTS = window.VS_FACTS || [];
 
   // Rotating shimmer status lines, like Claude's thinking copy.
   const STATUS = [
@@ -30,10 +31,28 @@
     const [statusIdx, setStatusIdx] = useState(0);
     const [completing, setCompleting] = useState(false);
     const [findingCount, setFindingCount] = useState(0);
+    // Live facts from GET /api/v1/fun-facts; fall back to static if unavailable.
+    const [facts, setFacts] = useState(STATIC_FACTS);
 
     const speedRef = useRef(speed || 1); speedRef.current = speed || 1;
     const completingRef = useRef(false);
+    const terminatedRef = useRef(false); // any terminal outcome reached (done/failed/cancelled)
     const wsRef = useRef(null);
+
+    // Fetch live fun facts from the backend; fall back silently to static list.
+    useEffect(() => {
+      if (!window.AkiraAPI) return;
+      window.AkiraAPI.funFacts.get()
+        .then((data) => {
+          // Backend returns an array of strings or {fact: string} objects.
+          const list = Array.isArray(data) ? data : (data && data.facts ? data.facts : null);
+          if (list && list.length > 0) {
+            const strings = list.map((f) => (typeof f === "string" ? f : (f.fact || f.text || String(f))));
+            setFacts(strings);
+          }
+        })
+        .catch(() => { /* silently use static fallback */ });
+    }, []);
 
     function finish(summary) {
       if (completingRef.current) return;
@@ -58,21 +77,29 @@
               setFindingCount((n) => n + 1);
               break;
             case "scan_completed":
+              terminatedRef.current = true;
               finish(payload);
               break;
             case "scan_failed":
-              if (onError) onError(payload && payload.error);
+              terminatedRef.current = true;
+              if (onError) onError((payload && payload.error) || "The scan did not complete.");
               break;
             case "scan_cancelled":
               // The app already handled the cancel intent; just stop.
+              terminatedRef.current = true;
               break;
             default:
               break;
           }
         },
         onError() {
-          // A transport error before completion surfaces as a scan error.
-          if (!completingRef.current && onError) onError("Lost connection to the scan.");
+          // A transport error before any terminal event surfaces as a scan error.
+          if (!terminatedRef.current && !completingRef.current && onError) onError("Lost connection to the scan.");
+        },
+        onClose() {
+          // The server closes the socket right after a terminal event. If it
+          // closed without one (e.g. backend died mid-scan), surface that.
+          if (!terminatedRef.current && !completingRef.current && onError) onError("The scan connection closed unexpectedly.");
         },
       });
       wsRef.current = conn;
@@ -97,11 +124,17 @@
       return () => clearInterval(iv);
     }, [scanId]);
 
-    // Rotating facts
+    // Rotating facts — loops forever so facts keep cycling for the whole scan.
+    // Depends on `facts` so that when the live list loads (replacing the static
+    // fallback) the modulo uses the new length and every fact gets shown; an
+    // empty-dep effect here would capture the stale length and silently skip the
+    // tail of the loaded list.
+    const factsLenRef = useRef(facts.length);
+    factsLenRef.current = facts.length || 1;
     useEffect(() => {
       const iv = setInterval(() => {
         setFactOut(true);
-        setTimeout(() => { setFactIdx((i) => (i + 1) % FACTS.length); setFactOut(false); }, 480);
+        setTimeout(() => { setFactIdx((i) => (i + 1) % factsLenRef.current); setFactOut(false); }, 480);
       }, 7000);
       return () => clearInterval(iv);
     }, []);
@@ -157,7 +190,7 @@
           h("div", { style: { color: "var(--text-3)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 } }, h(Icons.sparkle, { size: 16 })),
           h("div", { style: { flex: 1 } },
             h("div", { style: { fontSize: 10.5, fontWeight: 650, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--text-3)", marginBottom: 3 } }, "Did you know?"),
-            h("div", { key: factIdx, className: "fact" + (factOut ? " out" : ""), style: { fontSize: 13, lineHeight: 1.45, color: "var(--text-2)" } }, FACTS[factIdx])),
+            h("div", { key: factIdx, className: "fact" + (factOut ? " out" : ""), style: { fontSize: 13, lineHeight: 1.45, color: "var(--text-2)" } }, facts[factIdx] || "")),
         ),
       ),
     );

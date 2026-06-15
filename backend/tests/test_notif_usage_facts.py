@@ -103,11 +103,17 @@ async def test_usage_aggregate(auth):
 
     r = await client.get(f"{PREFIX}/usage", headers=headers)
     data = r.json()["data"]
-    calls = {c["provider"]: c["calls"] for c in data["api_calls_by_provider"]}
-    assert calls["gemini"] == 2 and calls["openrouter"] == 1
+    # Payload exposes vendor-free Akira labels, never the raw provider id.
+    calls = {c["label"]: c["calls"] for c in data["api_calls_by_provider"]}
+    assert calls["Akira Fast"] == 2 and calls["Akira Balanced"] == 1 and calls["Akira Deep"] == 0
+    for c in data["api_calls_by_provider"]:
+        assert "provider" not in c  # internal id not leaked
     assert data["scans_this_month"] == 1
     assert data["lifetime_segments"] == 12
-    assert data["session"]["tokens"] == 100 + 50 + 80 + 40 + 60 + 30
+    assert data["daily_scans"]["used"] == 1
+    assert data["daily_scans"]["limit"] == 5
+    for entry in data["daily_tokens_by_model"]:
+        assert "limit" in entry and entry["limit"] > 0
     assert "last_updated" in data
 
 

@@ -72,8 +72,6 @@
     { id: "account", label: "Account", icon: "key" },
     { id: "privacy", label: "Privacy & Data", icon: "eye" },
     { id: "security", label: "Security", icon: "shield" },
-    { id: "apikeys", label: "API Keys", icon: "key" },
-    { id: "models", label: "Models", icon: "cpu" },
     { id: "usage", label: "Usage", icon: "chart" },
     { id: "notifications", label: "Notifications", icon: "bell" },
     { id: "handoff", label: "Handoff links", icon: "terminal" },
@@ -121,8 +119,6 @@
             sec === "account" && h(AccountSec, { toast: safeToast }),
             sec === "privacy" && h(PrivacySec, { toast: safeToast }),
             sec === "security" && h(SecuritySec, { toast: safeToast }),
-            sec === "apikeys" && h(ApiKeysSec, { toast: safeToast }),
-            sec === "models" && h(ModelsSec, { toast: safeToast }),
             sec === "usage" && h(UsageSec, { toast: safeToast }),
             sec === "notifications" && h(NotifSec, { toast: safeToast }),
             sec === "handoff" && h(HandoffLinksSec, { toast: safeToast }),
@@ -130,7 +126,23 @@
   }
   window.SettingsModal = SettingsModal;
 
+  // Client-side preference persisted to localStorage. These are display-only
+  // settings with no backend endpoint; persisting locally keeps the user's
+  // choice across reloads instead of silently discarding it.
+  function usePref(key, fallback) {
+    const k = "akira.pref." + key;
+    const [val, setVal] = useState(() => {
+      try { return localStorage.getItem(k) || fallback; } catch (e) { return fallback; }
+    });
+    const set = (v) => { setVal(v); try { localStorage.setItem(k, v); } catch (e) {} };
+    return [val, set];
+  }
+
   function GeneralSec({ mode, setMode }) {
+    const [lang, setLang] = usePref("language", "English");
+    const [scanDepth, setScanDepth] = usePref("scanDepth", "Deep");
+    const [tz, setTz] = usePref("timezone", "(GMT+0) UTC");
+    const [dateFmt, setDateFmt] = usePref("dateFormat", "Jun 10, 2026");
     return h("div", null, h(H2, null, "General"),
       h(SRow, { label: "Appearance" },
         h("div", { style: { display: "flex", gap: 4, background: "var(--bg-inset)", padding: 3, borderRadius: 9 } },
@@ -140,11 +152,10 @@
                 background: mode === id ? "var(--bg-surface)" : "transparent", color: mode === id ? "var(--text-1)" : "var(--text-2)",
                 boxShadow: mode === id ? "var(--shadow-card)" : "none", transition: "all var(--dur-med) var(--ease-spring)" } },
               h(Icons[icon], { size: 14 }), label)))),
-      h(SRow, { label: "Language" }, h(Dropdown, { width: 160, options: ["English", "Deutsch", "日本語"] })),
-      h(SRow, { label: "Default scan depth" }, h(Dropdown, { width: 160, defaultValue: "Deep", options: ["Fast", "Deep", "Thorough"] })),
-      h(SRow, { label: "Default model" }, h(Dropdown, { width: 200, options: ["Auto (recommended)", "Gemini 2.0 Flash", "OpenRouter / Claude Haiku"] })),
-      h(SRow, { label: "Timezone" }, h(Dropdown, { width: 220, options: ["(GMT-8) Pacific Time", "(GMT+0) UTC", "(GMT+1) Berlin"] })),
-      h(SRow, { label: "Date format" }, h(Dropdown, { width: 160, options: ["Jun 10, 2026", "10/06/2026", "2026-06-10"] })));
+      h(SRow, { label: "Language" }, h(Dropdown, { width: 160, value: lang, onChange: setLang, options: ["English", "Deutsch", "日本語"] })),
+      h(SRow, { label: "Default scan depth" }, h(Dropdown, { width: 160, value: scanDepth, onChange: setScanDepth, options: ["Fast", "Deep", "Thorough"] })),
+      h(SRow, { label: "Timezone" }, h(Dropdown, { width: 220, value: tz, onChange: setTz, options: ["(GMT-8) Pacific Time", "(GMT+0) UTC", "(GMT+1) Berlin"] })),
+      h(SRow, { label: "Date format" }, h(Dropdown, { width: 160, value: dateFmt, onChange: setDateFmt, options: ["Jun 10, 2026", "10/06/2026", "2026-06-10"] })));
   }
 
   function SearchableSelect({ value, options, onChange, style, triggerStyle, placeholder = "Search..." }) {
@@ -431,7 +442,7 @@
 
     const explainers = [
       ["What we store", "Scan metadata, findings, and snippets of flagged code (max 40 lines per finding). We never store your full repository."],
-      ["Where code goes", "Code segments are sent to the model providers you configure (Gemini/OpenRouter) under your own API keys, then discarded."],
+      ["Where code goes", "Code segments are sent to Akira's AI models for analysis, then discarded. They are never used to train models."],
       ["Retention", "Scan history is kept until you delete it. Deleted scans are purged from backups within 30 days."]];
 
     return h("div", null, h(H2, null, "Privacy & Data"),
@@ -678,6 +689,20 @@
       } finally { setSaving(false); }
     }
 
+    // Session timeout is stored on the profile (session_timeout_minutes).
+    const TIMEOUTS = [["1 hour", 60], ["8 hours", 480], ["24 hours", 1440], ["7 days", 10080]];
+    const curMins = profileState.data && profileState.data.session_timeout_minutes;
+    const curTimeout = (TIMEOUTS.find(([, m]) => m === curMins) || TIMEOUTS[1])[0];
+    async function setTimeout_(label) {
+      const mins = (TIMEOUTS.find(([l]) => l === label) || [])[1];
+      if (mins == null) return;
+      try {
+        await API.profile.update({ session_timeout_minutes: mins });
+        toast({ kind: "success", msg: "Session timeout updated" });
+        reloadProfile();
+      } catch (e) { toast({ kind: "error", msg: errMsg(e) }); }
+    }
+
     const logins = history.data || [];
     return h("div", null, h(H2, null, "Security"),
       h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 14px", maxWidth: 460 } },
@@ -687,7 +712,7 @@
         h(Field, { label: "Confirm new password" }, h("input", { className: "field", type: "password", value: confirm, onChange: (e) => setConfirm(e.target.value) }))),
       h("button", { className: "btn btn-secondary btn-sm", style: { marginBottom: 22 }, disabled: saving, onClick: updatePassword }, saving ? "Updating…" : "Update password"),
       h(TwoFactorBlock, { toast, userEmail }),
-      h(SRow, { label: "Session timeout" }, h(Dropdown, { width: 140, defaultValue: "8 hours", options: ["1 hour", "8 hours", "24 hours", "7 days"] })),
+      h(SRow, { label: "Session timeout" }, h(Dropdown, { width: 140, value: curTimeout, onChange: setTimeout_, options: TIMEOUTS.map(([l]) => l) })),
       h("div", { style: { margin: "18px 0 8px", fontSize: 13, fontWeight: 650 } }, "Login history"),
       history.loading && !history.data
         ? h(LoadingBlock, { label: "Loading login history…" })
@@ -705,205 +730,66 @@
                     !l.success && h("span", { className: "badge", style: { background: "var(--sev-critical-bg)", color: "var(--sev-critical)" } }, "Blocked")))));
   }
 
-  // API Keys: GET /settings/api-keys, PUT (upsert), test, delete.
-  function ApiKeysSec({ toast }) {
-    const [loaded, reload] = useLoader(() => API.settings.getApiKeys(), []);
-    const [editing, setEditing] = useState({});     // provider -> input value
-    const [busy, setBusy] = useState({});            // provider -> bool
-    const PROVIDERS = [
-      { id: "gemini", name: "Gemini API key", placeholder: "AIza…" },
-      { id: "openrouter", name: "OpenRouter API key", placeholder: "sk-or-…" },
-      { id: "github", name: "GitHub token (for private repos)", placeholder: "ghp_…" },
-    ];
-    const keys = loaded.data || [];
-    const byProvider = {};
-    keys.forEach((k) => { byProvider[k.provider] = k; });
-
-    async function saveKey(provider) {
-      const val = (editing[provider] || "").trim();
-      if (val.length < 8) { toast({ kind: "error", msg: "Key looks too short" }); return; }
-      setBusy((b) => Object.assign({}, b, { [provider]: true }));
-      try {
-        await API.settings.putApiKeys({ provider, key: val });
-        toast({ kind: "success", msg: "Key saved" });
-        setEditing((e) => Object.assign({}, e, { [provider]: undefined }));
-        reload();
-      } catch (e) {
-        toast({ kind: "error", msg: errMsg(e) });
-      } finally {
-        setBusy((b) => Object.assign({}, b, { [provider]: false }));
-      }
-    }
-    async function testKey(provider) {
-      setBusy((b) => Object.assign({}, b, { [provider]: true }));
-      try {
-        const res = await API.settings.testApiKey(provider);
-        toast({ kind: res.status === "valid" ? "success" : "error", msg: res.detail || (res.status === "valid" ? "Key is valid" : "Key is invalid") });
-        reload();
-      } catch (e) {
-        toast({ kind: "error", msg: errMsg(e) });
-      } finally {
-        setBusy((b) => Object.assign({}, b, { [provider]: false }));
-      }
-    }
-    async function deleteKey(provider) {
-      setBusy((b) => Object.assign({}, b, { [provider]: true }));
-      try {
-        await API.settings.deleteApiKey(provider);
-        toast({ kind: "info", msg: "Key removed" });
-        reload();
-      } catch (e) {
-        toast({ kind: "error", msg: errMsg(e) });
-      } finally {
-        setBusy((b) => Object.assign({}, b, { [provider]: false }));
-      }
-    }
-
-    function statusBadge(status) {
-      const map = {
-        valid: { bg: "var(--sev-clean-bg)", c: "var(--sev-clean)", label: "Valid" },
-        invalid: { bg: "var(--sev-critical-bg)", c: "var(--sev-critical)", label: "Invalid" },
-        unverified: { bg: "var(--bg-active)", c: "var(--text-2)", label: "Not verified" },
-      };
-      const s = map[status] || map.unverified;
-      return h("span", { className: "badge", style: { background: s.bg, color: s.c } }, s.label);
-    }
-
-    return h("div", null, h(H2, null, "API Keys"),
-      h("p", { style: { fontSize: 12.5, color: "var(--text-2)", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 } },
-        h(Icons.shieldCheck, { size: 14, style: { color: "var(--sev-clean)" } }), "Keys are encrypted at rest and only used for your scans."),
-      loaded.loading && !loaded.data
-        ? h(LoadingBlock, { label: "Loading keys…" })
-        : loaded.error
-          ? h(ErrorBlock, { msg: loaded.error, onRetry: reload })
-          : h("div", null, PROVIDERS.map((p) => {
-              const k = byProvider[p.id];
-              const isEditing = editing[p.id] !== undefined;
-              return h("div", { key: p.id, style: { marginBottom: 16 } },
-                h("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 5, flexWrap: "wrap" } },
-                  h("label", { className: "flabel", style: { margin: 0 } }, p.name),
-                  k && statusBadge(k.status),
-                  k && k.last_verified_at && h("span", { style: { fontSize: 11, color: "var(--text-3)" } }, "verified " + relTime(k.last_verified_at))),
-                (k && !isEditing)
-                  ? h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
-                      h("input", { className: "field mono", type: "text", readOnly: true, value: k.masked, style: { fontSize: 12 } }),
-                      h("button", { className: "btn btn-secondary btn-sm", style: { flexShrink: 0 }, disabled: !!busy[p.id], onClick: () => testKey(p.id) },
-                        busy[p.id] ? h(Spinner, { size: 13 }) : h(Icons.zap, { size: 13 }), "Test"),
-                      h("button", { className: "btn btn-secondary btn-sm", style: { flexShrink: 0 }, onClick: () => setEditing((e) => Object.assign({}, e, { [p.id]: "" })) }, "Replace"),
-                      h("button", { className: "btn btn-ghost btn-sm", style: { flexShrink: 0, color: "var(--sev-critical)" }, disabled: !!busy[p.id], onClick: () => deleteKey(p.id) }, "Remove"))
-                  : h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
-                      h("input", { className: "field mono", type: "password", placeholder: p.placeholder, value: editing[p.id] || "", autoFocus: isEditing && k, onChange: (e) => setEditing((s) => Object.assign({}, s, { [p.id]: e.target.value })), style: { fontSize: 12 } }),
-                      h("button", { className: "btn btn-primary btn-sm", style: { flexShrink: 0 }, disabled: !!busy[p.id], onClick: () => saveKey(p.id) }, busy[p.id] ? "Saving…" : "Save"),
-                      isEditing && k && h("button", { className: "btn btn-ghost btn-sm", style: { flexShrink: 0 }, onClick: () => setEditing((e) => Object.assign({}, e, { [p.id]: undefined })) }, "Cancel")));
-            })));
-  }
-
-  // Models: GET/PUT /settings/models. Shape: { default_model, fallback_order: [provider], token_budgets: {} }.
-  function ModelsSec({ toast }) {
-    const [loaded, reload] = useLoader(() => API.settings.getModels(), []);
-    const [order, setOrder] = useState([]);
-    const [defaultModel, setDefaultModel] = useState("Auto");
-    const [budgets, setBudgets] = useState({});
-    const [dragIdx, setDragIdx] = useState(null);
-    const [saving, setSaving] = useState(false);
-
-    const PROVIDER_LABELS = { gemini: "Gemini", openrouter: "OpenRouter", github: "GitHub" };
-
-    useEffect(() => {
-      if (!loaded.data) return;
-      setOrder(loaded.data.fallback_order || []);
-      setDefaultModel(loaded.data.default_model || "Auto");
-      setBudgets(loaded.data.token_budgets || {});
-    }, [loaded.data]);
-
-    async function save() {
-      setSaving(true);
-      try {
-        await API.settings.putModels({ default_model: defaultModel, fallback_order: order, token_budgets: budgets });
-        toast({ kind: "success", msg: "Model settings saved" });
-        reload();
-      } catch (e) {
-        toast({ kind: "error", msg: errMsg(e) });
-      } finally { setSaving(false); }
-    }
-
-    if (loaded.loading && !loaded.data) return h("div", null, h(H2, null, "Models"), h(LoadingBlock, { label: "Loading models…" }));
-    if (loaded.error) return h("div", null, h(H2, null, "Models"), h(ErrorBlock, { msg: loaded.error, onRetry: reload }));
-
-    const modelOptions = ["Auto"].concat(order.map((p) => PROVIDER_LABELS[p] || p));
-
-    return h("div", null, h(H2, null, "Models"),
-      h(SRow, { label: "Default model" },
-        h(Dropdown, { width: 200, value: defaultModel, defaultValue: defaultModel, onChange: setDefaultModel, options: modelOptions })),
-      h("div", { style: { padding: "12px 14px", borderRadius: "var(--r-md)", background: "var(--bg-inset)", border: "1px solid var(--border)", margin: "14px 0", fontSize: 12.5, color: "var(--text-2)", display: "flex", gap: 8 } },
-        h(Icons.sparkle, { size: 15, style: { color: "var(--accent)", flexShrink: 0 } }),
-        "Auto mode routes each segment to the fastest model with available quota, falls back down your chain on rate limits, and reserves your strongest model for cross-verifying Criticals."),
-      h("div", { style: { fontSize: 13, fontWeight: 650, margin: "16px 0 8px" } }, "Fallback chain", h("span", { style: { fontWeight: 400, fontSize: 12, color: "var(--text-3)", marginLeft: 8 } }, "drag to reorder")),
-      order.length === 0
-        ? h("div", { style: { fontSize: 12.5, color: "var(--text-3)", marginBottom: 18 } }, "No providers configured.")
-        : h("div", { style: { display: "flex", flexDirection: "column", gap: 6, marginBottom: 18 } },
-            order.map((p, i) => {
-              const label = PROVIDER_LABELS[p] || p;
-              const budget = budgets[p] != null ? budgets[p] : 60;
-              return h("div", { key: p, draggable: true,
-                onDragStart: () => setDragIdx(i),
-                onDragOver: (e) => { e.preventDefault(); if (dragIdx !== null && dragIdx !== i) { setOrder((o) => { const n = [...o]; const [x] = n.splice(dragIdx, 1); n.splice(i, 0, x); return n; }); setDragIdx(i); } },
-                onDragEnd: () => setDragIdx(null),
-                style: { display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: "var(--r-md)", background: dragIdx === i ? "var(--accent-soft)" : "var(--bg-surface)", border: "1px solid " + (dragIdx === i ? "var(--accent)" : "var(--border)"), cursor: "grab", transition: "background var(--dur-micro) ease, transform var(--dur-micro) var(--ease-spring)", transform: dragIdx === i ? "scale(1.01)" : "none" } },
-                h("span", { className: "mono", style: { fontSize: 11, color: "var(--text-3)", width: 16 } }, i + 1),
-                h(Icons.menu, { size: 13, style: { color: "var(--text-3)" } }),
-                h("span", { style: { fontSize: 13, fontWeight: 550, flex: 1 } }, label),
-                h("div", { style: { width: 160, display: "flex", alignItems: "center", gap: 8 } },
-                  h("input", { type: "range", min: 10, max: 100, value: budget, onChange: (e) => { const v = parseInt(e.target.value, 10); setBudgets((b) => Object.assign({}, b, { [p]: v })); }, style: { flex: 1, accentColor: "var(--accent)" } }),
-                  h("span", { className: "mono", style: { fontSize: 11, color: "var(--text-3)", width: 34 } }, budget + "k")));
-            })),
-      h("button", { className: "btn btn-primary btn-sm", disabled: saving, onClick: save }, saving ? "Saving…" : "Save model settings"));
-  }
-
-  // Usage: GET /usage.
+  // Usage: GET /usage. All limits come from the backend — the daily-scan cap for
+  // the top card, and the per-tier daily token limit returned alongside each
+  // model row. The UI never invents quota numbers.
   function UsageSec({ toast }) {
     const [loaded, reload] = useLoader(() => API.usage.get(), []);
-    const colors = ["#7aa2f7", "#c792ea", "#9ece6a", "#e0af68"];
 
     if (loaded.loading && !loaded.data) return h("div", null, h(H2, null, "Usage"), h(LoadingBlock, { label: "Loading usage…" }));
     if (loaded.error) return h("div", null, h(H2, null, "Usage"), h(ErrorBlock, { msg: loaded.error, onRetry: reload }));
 
     const d = loaded.data || {};
-    const sessionTokens = (d.session && d.session.tokens) || 0;
-    const SESSION_QUOTA = 100000; // tokens/day quota for the progress display
-    const sessionPct = Math.min(100, Math.round((sessionTokens / SESSION_QUOTA) * 100));
+    const scans = d.daily_scans || { used: 0, limit: 0, remaining: 0 };
+    const scanPct = scans.limit ? Math.min(100, Math.round((scans.used / scans.limit) * 100)) : 0;
     const dailyByModel = d.daily_tokens_by_model || [];
-    const dailyMax = Math.max(SESSION_QUOTA, ...dailyByModel.map((m) => m.tokens || 0));
 
-    const callsByProvider = d.api_calls_by_provider || [];
-    const cards = [
-      ["Scans this month", String(d.scans_this_month != null ? d.scans_this_month : 0)],
-      ["Lifetime segments", (d.lifetime_segments != null ? d.lifetime_segments : 0).toLocaleString()],
-    ].concat(callsByProvider.map((c) => ["API calls (" + (c.label || c.provider) + ")", (c.calls || 0).toLocaleString()]));
+    return h("div", { style: { display: "flex", flexDirection: "column", gap: 20 } },
+      h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+        h(H2, null, "Usage"),
+        h("button", { className: "btn btn-ghost btn-sm", onClick: reload, style: { padding: "4px 8px" } },
+          h(Icons.refresh, { size: 13, style: { marginRight: 4 } }), "Refresh")
+      ),
 
-    return h("div", null, h(H2, null, "Usage"),
-      h("div", { style: { marginBottom: 18 } },
-        h("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 6 } },
-          h("span", { style: { fontWeight: 550 } }, "Current session"), h("span", { style: { color: "var(--text-3)" } }, sessionPct + "% of daily quota")),
-        h(ProgressBar, { value: sessionPct })),
-      h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 } },
-        cards.map(([label, val]) =>
-          h("div", { key: label, className: "card", style: { padding: "12px 16px" } },
-            h("div", { style: { fontSize: 12, color: "var(--text-2)" } }, label),
-            h("div", { style: { fontSize: 20, fontWeight: 700, marginTop: 2, fontVariantNumeric: "tabular-nums" } }, val)))),
-      h("div", { style: { fontSize: 13, fontWeight: 650, marginBottom: 8 } }, "Daily tokens by model"),
-      dailyByModel.length === 0
-        ? h("div", { style: { fontSize: 12.5, color: "var(--text-3)", marginBottom: 16 } }, "No model usage in the last 24 hours.")
-        : h("div", { style: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 } },
-            dailyByModel.map((m, i) => {
-              const pct = Math.min(100, Math.round((m.tokens / dailyMax) * 100));
-              return h("div", { key: m.provider },
-                h("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 } },
-                  h("span", null, m.label || m.provider), h("span", { className: "mono", style: { color: "var(--text-3)" } }, Math.round((m.tokens || 0) / 1000) + "k / " + Math.round(dailyMax / 1000) + "k")),
-                h(ProgressBar, { value: pct, color: colors[i % colors.length] }));
-            })),
-      h("div", { style: { display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: "var(--text-3)" } },
-        "Last updated " + relTime(d.last_updated), h("button", { className: "btn btn-ghost btn-sm", onClick: reload }, h(Icons.refresh, { size: 12 }), "Refresh")));
+      // Daily scan quota card (the real rolling-24h cap the backend enforces).
+      h("div", { className: "card", style: { padding: "16px 20px", background: "linear-gradient(135deg, var(--bg-surface), var(--accent-soft))", border: "1px solid var(--accent-border)" } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 600, marginBottom: 8 } },
+          h("span", { style: { color: "var(--text-1)" } }, "Daily scans"),
+          h("span", { style: { color: "var(--accent)" } }, scanPct + "% of daily limit")
+        ),
+        h(ProgressBar, { value: scanPct }),
+        h("div", { style: { fontSize: 11.5, color: "var(--text-3)", marginTop: 8 } },
+          "You've used " + scans.used + " of " + scans.limit + " scans in the last 24 hours · " + scans.remaining + " remaining."
+        )
+      ),
+
+      // Daily token usage per model, against the backend-reported per-tier limit.
+      h("div", { className: "card", style: { padding: "18px 20px" } },
+        h("div", { style: { fontSize: 13.5, fontWeight: 650, marginBottom: 14, color: "var(--text-1)" } }, "Daily token usage by model"),
+        dailyByModel.length === 0
+          ? h("div", { style: { fontSize: 12.5, color: "var(--text-3)" } }, "No model usage in the last 24 hours.")
+          : h("div", { style: { display: "flex", flexDirection: "column", gap: 14 } },
+              dailyByModel.map((m) => {
+                const tokens = m.tokens || 0;
+                const limit = m.limit || 0;
+                const pct = limit ? Math.min(100, Math.round((tokens / limit) * 100)) : 0;
+                return h("div", { key: m.label },
+                  h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, marginBottom: 6 } },
+                    h("span", { style: { fontWeight: 550, color: "var(--text-2)" } }, m.label),
+                    h("span", { className: "mono", style: { color: "var(--text-1)", fontWeight: 600 } }, pct + "%")
+                  ),
+                  h(ProgressBar, { value: pct }),
+                  h("div", { style: { fontSize: 11, color: "var(--text-3)", marginTop: 4 } },
+                    tokens.toLocaleString() + (limit ? " / " + limit.toLocaleString() + " tokens" : " tokens"))
+                );
+              })
+            )
+      ),
+
+      h("div", { style: { fontSize: 11, color: "var(--text-3)", textAlign: "right" } },
+        "Last updated " + relTime(d.last_updated)
+      )
+    );
   }
 
   // Notifications: GET/PUT /notifications/preferences.
@@ -950,11 +836,23 @@
   }
 
   function HelpSec() {
-    const items = [["Documentation", "book"], ["Security glossary", "globe"], ["Keyboard shortcuts", "cmd"], ["Report a bug", "bug"], ["Contact support", "help"], ["Changelog", "sparkle"]];
+    const DOCS = "https://github.com/donaldemmaogbame/AkiraAI";
+    const SUPPORT = "mailto:support@akira.ai?subject=Akira%20AI%20Support";
+    const BUG = "mailto:support@akira.ai?subject=Akira%20AI%20Bug%20Report";
+    // Each item: [label, icon, action]. Doc-style links open the repo/docs in a
+    // new tab; support/bug open a pre-filled mail draft.
+    const items = [
+      ["Documentation", "book", () => window.open(DOCS + "#readme", "_blank")],
+      ["Security glossary", "globe", () => window.open(DOCS + "/blob/main/backend/README.md", "_blank")],
+      ["Keyboard shortcuts", "cmd", () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))],
+      ["Report a bug", "bug", () => { window.location.href = BUG; }],
+      ["Contact support", "help", () => { window.location.href = SUPPORT; }],
+      ["Changelog", "sparkle", () => window.open(DOCS + "/commits/main", "_blank")],
+    ];
     return h("div", null, h(H2, null, "Help & Support"),
       h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } },
-        items.map(([label, icon]) =>
-          h("button", { key: label, className: "card card-hover", style: { padding: "14px 16px", display: "flex", alignItems: "center", gap: 10, textAlign: "left" } },
+        items.map(([label, icon, action]) =>
+          h("button", { key: label, className: "card card-hover", onClick: action, style: { padding: "14px 16px", display: "flex", alignItems: "center", gap: 10, textAlign: "left", cursor: "pointer" } },
             h(Icons[icon], { size: 16, style: { color: "var(--accent)" } }),
             h("span", { style: { fontSize: 13, fontWeight: 550 } }, label)))),
       h("div", { style: { marginTop: 20, fontSize: 12, color: "var(--text-3)" } }, "Akira AI v2.4.1 · © 2026 Akira AI Inc."));

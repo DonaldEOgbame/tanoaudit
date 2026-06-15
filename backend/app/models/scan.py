@@ -87,8 +87,8 @@ class Scan(Base):
     # The worker that claimed this scan (null until claimed). For debugging and
     # reclaiming scans orphaned by a crashed worker.
     worker_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    # Times this scan has been (re)dispatched. Orphan recovery re-enqueues a
-    # stuck scan until this hits the cap, then marks it failed.
+    # Times this scan has been (re)queued. Orphan recovery re-queues a stuck scan
+    # until this hits the cap, then marks it failed.
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     correlation_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

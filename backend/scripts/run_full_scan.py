@@ -75,9 +75,9 @@ async def _amain(args) -> int:
     counter = {"n": 0}
     completer = getattr(llm_clients, f"complete_{provider}")
 
-    async def counting(k, prompt, model=None):
+    async def counting(k, prompt, model=None, *args, **kwargs):
         counter["n"] += 1
-        return await completer(k, prompt, model)
+        return await completer(k, prompt, model, *args, **kwargs)
 
     llm_clients.COMPLETERS[provider] = counting
     setattr(llm_clients, f"complete_{provider}", counting)

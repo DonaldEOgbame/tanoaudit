@@ -396,14 +396,6 @@
     { who: "Watchlist", action: "detected 3 new findings in", target: "ecommerce-api", when: "yesterday", icon: "bell" },
   ];
 
-  // Team members
-  window.VS_TEAM = [
-    { name: "You (Alex Rivera)", email: "alex@acme.dev", role: "Admin", initials: "AR", color: "#10b981", you: true },
-    { name: "Maya Chen", email: "maya@acme.dev", role: "Analyst", initials: "MC", color: "#7aa2f7" },
-    { name: "Dev Patel", email: "dev@acme.dev", role: "Analyst", initials: "DP", color: "#f59e0b" },
-    { name: "Sara Kim", email: "sara@acme.dev", role: "Viewer", initials: "SK", color: "#c792ea" },
-  ];
-
   // History — previous scans of ecommerce-api for the diff view
   window.VS_HISTORY = {
     trend: [22, 28, 31, 35, 33, 38], // score over last 6 scans

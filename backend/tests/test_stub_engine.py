@@ -92,20 +92,42 @@ def test_parse_missing_stubs_defaults_empty():
 
 
 # ---- Unit: scoring ----------------------------------------------------------
+class _F:
+    def __init__(self, sev):
+        self.severity = sev
+
+
 def test_completeness_score_clean():
-    assert scoring.completeness_score([]) == 100
+    # No stubs → perfect, regardless of size.
+    assert scoring.completeness_score([], segments=100) == 100
+    assert scoring.completeness_score([], segments=0) == 100
 
 
 def test_completeness_score_severity_weighted():
-    class F:
-        def __init__(self, sev):
-            self.severity = sev
+    # Within the same codebase size, a critical hurts more than an info.
+    crit = scoring.completeness_score([_F("critical")], segments=50)
+    info = scoring.completeness_score([_F("info")], segments=50)
+    assert info > crit
+    # Enough criticals still clamp to 0.
+    assert scoring.completeness_score([_F("critical")] * 50, segments=50) == 0
 
-    # One critical penalizes heavily; one info barely.
-    assert scoring.completeness_score([F("critical")]) == 70
-    assert scoring.completeness_score([F("info")]) == 99
-    # Many criticals clamp at 0.
-    assert scoring.completeness_score([F("critical")] * 10) == 0
+
+def test_scores_are_size_relative():
+    # The SAME findings score higher in a larger codebase than a tiny one —
+    # this is the whole point of normalizing by segment count.
+    stubs = [_F("high"), _F("medium"), _F("low")]
+    small = scoring.completeness_score(stubs, segments=8)
+    large = scoring.completeness_score(stubs, segments=200)
+    assert large > small
+    assert 0 <= small <= 100 and 0 <= large <= 100
+
+    sec = [_F("critical"), _F("high")]
+    assert scoring.security_score(sec, segments=200) > scoring.security_score(sec, segments=8)
+
+
+def test_tiny_repo_does_not_divide_to_zero():
+    # A 1-segment repo with one finding shouldn't crater to 0 (segment floor).
+    assert scoring.completeness_score([_F("medium")], segments=1) > 50
 
 
 # ---- Unit: content hash -----------------------------------------------------

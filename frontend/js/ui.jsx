@@ -343,11 +343,22 @@
   }
   window.Ring = Ring;
 
-  // score color helper
+  // score color helper — higher score = safer = greener.
   window.scoreColor = function (s) {
     if (s >= 85) return "var(--sev-clean)";
     if (s >= 65) return "var(--sev-low)";
     if (s >= 45) return "var(--sev-high)";
     return "var(--sev-critical)";
+  };
+
+  // Security RISK = 100 − security_score. Higher RISK = worse. The whole app
+  // presents security as risk (higher = more dangerous), so these two helpers
+  // convert the stored safety score into the displayed risk value + color.
+  window.riskFromScore = function (score) {
+    return Math.max(0, Math.min(100, 100 - (score == null ? 0 : score)));
+  };
+  // Color for a RISK value: high risk = red, low risk = green (inverse of score).
+  window.riskColor = function (risk) {
+    return window.scoreColor(100 - (risk == null ? 0 : risk));
   };
 })();

@@ -69,7 +69,7 @@ RULES — ABSOLUTE, NO EXCEPTIONS:
 
 SCAN REPORT DATA:
 Repository: {scan.repo or scan.id} (branch {scan.branch or '—'} @ {scan.commit or '—'})
-Security score: {scan.security_score}/100 · Optimization score: {scan.optimization_score}/100 · Completeness score: {scan.completeness_score}/100
+Metrics (0-100): Security risk {max(0, 100 - (scan.security_score or 0))}/100 (HIGHER = MORE RISK / worse) · Optimization {scan.optimization_score}/100 (higher = better) · Completeness {scan.completeness_score}/100 (higher = more complete). Always refer to security as "risk", never a "score".
 Files: {scan.files} · Segments: {scan.segment_total}
 Executive summary: {scan.executive_summary or '(none)'}
 Files with findings: {json.dumps(file_list)}

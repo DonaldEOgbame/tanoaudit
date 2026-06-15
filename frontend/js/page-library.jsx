@@ -8,6 +8,15 @@
   const { SevBadge, SevDot, Switch, Ring, Tag, Modal, scoreColor, ProgressBar, Dropdown } = window;
   const API = window.AkiraAPI;
 
+  // One labelled section of a research result: small uppercase heading + body.
+  // Returns null when there's no content so empty sections are skipped.
+  function ResultSection(label, body) {
+    if (!body || !String(body).trim()) return null;
+    return h("div", { key: label },
+      h("div", { style: { fontSize: 10.5, fontWeight: 650, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 } }, label),
+      h("p", { style: { fontSize: 12.5, lineHeight: 1.6, color: "var(--text-1)", margin: 0 } }, body));
+  }
+
   // Map backend severity (may include "info") onto the badge set the UI knows.
   function uiSev(sev) {
     const s = (sev || "medium").toLowerCase();
@@ -157,23 +166,44 @@
       setPhase("research"); setQueries([]); setSynth(false); setResult(null); setResearchErr(null);
       const body = { name, description: desc };
       if (vuln) body.custom_vuln_id = vuln.id;
-      let saved = false;
+      let gotDefinition = null;
+      let streamErr = null;
       try {
         const handle = API.stream("/custom-vulnerabilities/research", body, (ev) => {
-          // ev is parsed JSON payload of each `data:` line. We don't get the
-          // event name from the helper, so infer phase from payload shape.
+          // Each data payload carries an explicit `event` field (the SSE helper
+          // only reads `data:` lines, not the `event:` line). Drive the animation
+          // off that so the synthesizing stage and completion are accurate.
           if (!ev || typeof ev !== "object") return;
-          if (ev.query) setQueries((qs) => qs.includes(ev.query) ? qs : [...qs, ev.query]);
-          if (ev.stage === "synthesizing" || ev.synthesizing) setSynth(true);
-          if (ev.definition) { setSynth(true); setResult(ev.definition); }
-          if (ev.id) saved = true; // `saved` event
+          // Capture animation stages.
+          if (ev.event === "search_query_sent" && ev.query) {
+            setQueries((qs) => qs.includes(ev.query) ? qs : [...qs, ev.query]);
+          } else if (ev.event === "synthesizing") {
+            setSynth(true);
+          } else if (ev.event === "research_failed") {
+            streamErr = ev.error || "Research failed";
+          } else if (!ev.event && ev.query) {
+            // back-compat: payloads without an explicit event field
+            setQueries((qs) => qs.includes(ev.query) ? qs : [...qs, ev.query]);
+          }
+          // Capture the definition from ANY event that carries one (normally
+          // research_completed). Robust to event-name changes / reorderings.
+          if (ev.definition && (ev.definition.what_it_is || ev.definition.detection_patterns)) {
+            gotDefinition = ev.definition;
+            setSynth(true);
+            setResult(ev.definition);
+          }
         });
         streamRef.current = handle;
         await handle.promise;
-        // The backend created/updated the row server-side; treat as success.
-        setPhase("result");
-        if (!saved && !result) {
-          // Research streamed but persistence event missed — still reload.
+        // Only show "complete" once we actually have the researched definition.
+        if (gotDefinition) {
+          setPhase("result");
+        } else {
+          // Stream ended without a definition — surface honestly, don't claim done.
+          const msg = streamErr || "Research didn't return a result. Try again.";
+          setResearchErr(msg);
+          setPhase("form");
+          toast({ kind: "error", msg });
         }
       } catch (e) {
         setResearchErr(errMsg(e));
@@ -222,16 +252,20 @@
               h(Icons.sparkle, { size: 14, style: { color: "var(--accent)" } }),
               h("span", { style: { fontSize: 12.5, fontWeight: 550 } }, "Cross-referencing sources · extracting detection patterns…")))),
         phase === "result" && h("div", { className: "step-panel" },
-          h("div", { className: "card", style: { padding: 16, marginBottom: 12, background: "var(--bg-inset)" } },
-            h("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10 } },
-              h(SevBadge, { sev }), h("span", { style: { fontWeight: 650, fontSize: 14 } }, name || "Custom vulnerability")),
-            h("div", { style: { fontSize: 12.5, lineHeight: 1.55, color: "var(--text-2)" } },
-              result ? h(React.Fragment, null,
-                result.what_it_is && h("p", { style: { marginBottom: 8 } }, h("strong", { style: { color: "var(--text-1)" } }, "What it is: "), result.what_it_is),
-                result.detection_patterns && h("p", { style: { marginBottom: 8 } }, h("strong", { style: { color: "var(--text-1)" } }, "Detection patterns: "), result.detection_patterns),
-                result.how_to_fix && h("p", { style: { marginBottom: 8 } }, h("strong", { style: { color: "var(--text-1)" } }, "How to fix: "), result.how_to_fix),
-                Array.isArray(result.source_urls) && result.source_urls.length > 0 && h("p", null, h("strong", { style: { color: "var(--text-1)" } }, "Sources: "), result.source_urls.join(" · ")))
-                : h("p", null, "Research complete and saved to your library."))),
+          h("div", { className: "card", style: { padding: 18, marginBottom: 12, background: "var(--bg-inset)" } },
+            h("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid var(--border)" } },
+              h(SevBadge, { sev }), h("span", { style: { fontWeight: 650, fontSize: 14.5 } }, name || "Custom vulnerability")),
+            result ? h("div", { style: { display: "flex", flexDirection: "column", gap: 14 } },
+              ResultSection("What it is", result.what_it_is),
+              ResultSection("Detection patterns", result.detection_patterns),
+              ResultSection("What to look for", result.what_to_look_for),
+              ResultSection("How to fix", result.how_to_fix),
+              (Array.isArray(result.source_urls) && result.source_urls.length > 0) && h("div", null,
+                h("div", { style: { fontSize: 10.5, fontWeight: 650, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 } }, "Sources"),
+                h("div", { style: { display: "flex", flexDirection: "column", gap: 4 } },
+                  result.source_urls.map((u, i) =>
+                    h("a", { key: i, href: u, target: "_blank", rel: "noopener noreferrer", style: { fontSize: 12, color: "var(--accent)", wordBreak: "break-all", textDecoration: "none" } }, u)))))
+              : h("p", { style: { fontSize: 12.5, color: "var(--text-2)" } }, "Research complete and saved to your library.")),
           h("div", { style: { fontSize: 12, color: "var(--text-3)" } }, "This rule runs in every future scan. You can edit it any time."))),
       h("div", { style: { padding: "14px 22px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "flex-end", gap: 8 } },
         phase === "form" && (vuln ?
@@ -292,8 +326,15 @@
     async function toggleGoal(goal) {
       const next = goal.status === "Done" ? "Pending" : "Done";
       try {
-        const updated = await API.plans.updateGoal(goal.id, { status: next });
-        setPlans((ps) => ps.map((x) => x.id === updated.id ? updated : x));
+        const updatedGoal = await API.plans.updateGoal(goal.id, { status: next });
+        // updateGoal returns the updated goal, not a plan — patch it into the
+        // correct plan's goals array.
+        setPlans((ps) => ps.map((plan) => {
+          if (!plan.goals.some((g) => g.id === goal.id)) return plan;
+          return Object.assign({}, plan, {
+            goals: plan.goals.map((g) => g.id === goal.id ? (updatedGoal || Object.assign({}, g, { status: next })) : g),
+          });
+        }));
       } catch (e) {
         toast({ kind: "error", msg: errMsg(e) });
       }
@@ -389,24 +430,43 @@
         toast({ kind: "success", msg: "Plan saved" });
         onCreated();
       } catch (e) {
-        toast({ kind: "error", msg: errMsg(e) });
         setSaving(false);
+        // The backend also validates (source of truth). If it rejects with
+        // per-goal issues, surface them in the issues view instead of a plain
+        // error so the user can fix and re-validate.
+        if (e && e.code === "plan_validation_failed" && e.details && Array.isArray(e.details.issues)) {
+          setIssues(e.details.issues);
+          setValidationOk(false);
+          setPhase("issues");
+          toast({ kind: "error", msg: "Some goals need attention before saving." });
+          return;
+        }
+        toast({ kind: "error", msg: errMsg(e) });
       }
     }
 
-    // Validate streams SSE: approved | issues_found. Then user can save.
+    // Validate streams SSE: approved | issues_found | error. AI-only — there is no
+    // heuristic fallback, so an error means validation genuinely couldn't run and
+    // we must NOT show "looks good".
     async function validate() {
       const goals = goalList();
       if (goals.length === 0) { toast({ kind: "error", msg: "Add at least one goal" }); return; }
       setPhase("validating"); setIssues([]); setValidationOk(false);
+      let streamError = null;
       try {
         const handle = API.stream("/optimization-plans/validate", { goals, repository_id: repoId || null }, (ev) => {
           if (!ev || typeof ev !== "object") return;
+          if (ev.status === "error") { streamError = ev.error || "Validation is unavailable."; return; }
           if (Array.isArray(ev.issues)) setIssues(ev.issues);
           if (ev.status === "approved" || ev.approved) setValidationOk(true);
         });
         streamRef.current = handle;
         await handle.promise;
+        if (streamError) {
+          toast({ kind: "error", msg: streamError });
+          setPhase("form");
+          return;
+        }
         setPhase("issues");
       } catch (e) {
         toast({ kind: "error", msg: "Validation failed: " + errMsg(e) });
@@ -462,14 +522,19 @@
           h("div", { style: { fontSize: 12.5, color: "var(--text-2)" } }, "You can revise the goals or save the plan as-is.")),
       ),
       h("div", { style: { padding: "14px 22px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "flex-end", gap: 8 } },
+        // Form phase: validation is MANDATORY — the only way forward is Validate.
+        // There is no Save here, so a plan can never be saved unvalidated.
         phase === "form" && h(React.Fragment, null,
           h("button", { className: "btn btn-secondary", onClick: onClose }, "Cancel"),
-          !noRepos && h("button", { className: "btn btn-secondary", disabled: !goalsText.trim(), onClick: validate }, h(Icons.shieldCheck, { size: 15 }), "Validate"),
-          !noRepos && h("button", { className: "btn btn-primary", disabled: saving || !goalsText.trim() || !repoId, onClick: persist }, saving ? h("div", { className: "spinner", style: { width: 13, height: 13 } }) : null, "Save Plan")
+          !noRepos && h("button", { className: "btn btn-primary", disabled: !goalsText.trim() || !repoId, onClick: validate }, h(Icons.shieldCheck, { size: 15 }), "Validate")
         ),
+        // Issues phase: Save is only allowed when validation APPROVED (clean).
+        // If the AI flagged issues, the user must revise and re-validate.
         phase === "issues" && h(React.Fragment, null,
           h("button", { className: "btn btn-ghost", onClick: () => setPhase("form") }, "Revise"),
-          h("button", { className: "btn btn-primary", disabled: saving, onClick: persist }, saving ? h("div", { className: "spinner", style: { width: 13, height: 13 } }) : null, "Save Plan"))));
+          (validationOk && issues.length === 0)
+            ? h("button", { className: "btn btn-primary", disabled: saving, onClick: persist }, saving ? h("div", { className: "spinner", style: { width: 13, height: 13 } }) : null, "Save Plan")
+            : h("button", { className: "btn btn-primary", disabled: true, title: "Fix the flagged goals and re-validate before saving" }, "Save Plan"))));
   }
 
   // ============ WATCHLIST ============
@@ -559,8 +624,8 @@
               h("button", { className: "icon-btn", "data-tip": "Unpin", onClick: () => unpin(w) }, h(Icons.x, { size: 14 }))),
             h("div", { style: { display: "flex", alignItems: "center", gap: 16, marginBottom: 14 } },
               h("div", null,
-                h("div", { style: { fontSize: 26, fontWeight: 700, color: scoreColor(w.score == null ? 0 : w.score) } }, w.score == null ? "—" : w.score),
-                h("div", { style: { fontSize: 11, color: "var(--text-3)" } }, "security score")),
+                h("div", { style: { fontSize: 26, fontWeight: 700, color: w.score == null ? "var(--text-3)" : window.riskColor(window.riskFromScore(w.score)) } }, w.score == null ? "—" : window.riskFromScore(w.score)),
+                h("div", { style: { fontSize: 11, color: "var(--text-3)" } }, "security risk")),
               h("div", { style: { flex: 1 } }),
               h("div", { style: { textAlign: "right", fontSize: 11.5, color: "var(--text-3)" } }, "last scan", h("br", null), fmtDate(w.last))),
             h("div", { style: { display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", paddingTop: 12, borderTop: "1px solid var(--border)" } },
@@ -694,7 +759,7 @@
                 h("span", { style: { fontWeight: 650, fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, label),
                 !done && h("span", { className: "badge", style: { background: "var(--bg-active)", color: "var(--text-3)" } }, s.status)),
               h("div", { style: { display: "flex", gap: 14, fontSize: 12, color: "var(--text-2)", marginBottom: 12 } },
-                h("span", null, h("strong", { style: { color: scoreColor(s.security_score == null ? 0 : s.security_score), fontSize: 16 } }, s.security_score == null ? "—" : s.security_score), " score"),
+                h("span", null, h("strong", { style: { color: s.security_score == null ? "var(--text-3)" : window.riskColor(window.riskFromScore(s.security_score)), fontSize: 16 } }, s.security_score == null ? "—" : window.riskFromScore(s.security_score)), " risk"),
                 h("span", { style: { marginLeft: "auto", color: "var(--text-3)" } }, fmtDate(s.completed_at || s.created_at))),
               done
                 ? h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },

@@ -24,13 +24,6 @@ python-multipart==0.0.32   # form / file uploads
 tree-sitter==0.25.2
 tree-sitter-language-pack==1.8.1
 
-# Real-time / cross-process event bus + arq task queue.
-# Pinned to redis 5.x because arq 0.28 requires redis<6; the redis.asyncio
-# pub/sub + pipeline API the event bus uses is unchanged across 5.x↔8.x.
-redis==5.3.1
-arq==0.28.0
-hiredis==3.4.0
-
 # Utilities
 httpx==0.28.1
 

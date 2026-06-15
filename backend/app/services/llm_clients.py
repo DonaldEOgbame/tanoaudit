@@ -6,6 +6,7 @@ timeout). Usage logging (Module 16) hooks the returned token counts later.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 import httpx
@@ -47,10 +48,13 @@ DEFAULT_MODELS = {
     "openrouter": settings.openrouter_model,
 }
 
-# Friendly label used for finding attribution / UI.
+# Neutral, vendor-free labels for any place a provider id would otherwise be
+# shown to a user (e.g. usage stats). Finding attribution uses the per-scan Akira
+# tier label via ModelRouter.label_for; this is the fallback for aggregate views
+# that only know the provider. The vendor name is deliberately never surfaced.
 PROVIDER_LABELS = {
-    "gemini": "Gemini 2.0 Flash",
-    "openrouter": "OpenRouter / Claude Haiku",
+    "gemini": "Akira Fast",
+    "openrouter": "Akira (Balanced/Deep)",
 }
 
 
@@ -58,20 +62,22 @@ def _timeout() -> httpx.Timeout:
     return httpx.Timeout(SEGMENT_TIMEOUT_S)
 
 
-async def complete_gemini(key: str, prompt: str, model: str | None = None) -> Completion:
+async def complete_gemini(
+    key: str, prompt: str, model: str | None = None, response_json: bool = True
+) -> Completion:
     model = model or DEFAULT_MODELS["gemini"]
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    # Force JSON output and a generous token cap: analysis must return parseable
-    # JSON, and without these some models wrap the JSON in prose/fences or get
-    # truncated on larger segments, which loses the whole segment's findings.
+    # Force JSON output and a generous token cap when requested: analysis must
+    # return parseable JSON.
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
-            "responseMimeType": "application/json",  # REST v1beta camelCase
             "maxOutputTokens": MAX_ANALYSIS_TOKENS,
             "temperature": 0,
         },
     }
+    if response_json:
+        payload["generationConfig"]["responseMimeType"] = "application/json"  # REST v1beta camelCase
     try:
         async with httpx.AsyncClient(timeout=_timeout()) as c:
             r = await c.post(url, params={"key": key}, json=payload)
@@ -102,21 +108,21 @@ async def complete_gemini(key: str, prompt: str, model: str | None = None) -> Co
 async def _openai_style(
     provider: str, base_url: str, key: str, prompt: str, model: str,
     extra_headers: dict | None = None,
+    response_json: bool = True,
 ) -> Completion:
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     if extra_headers:
         headers.update(extra_headers)
     # These completers serve analysis, which must return parseable JSON. Force
-    # JSON object mode + a token cap so larger segments aren't fenced/truncated
-    # (same fix as the Gemini completer; the chat/fix streamer is separate and
-    # stays free-text). OpenAI-compatible APIs (OpenRouter) honor this.
+    # JSON object mode + a token cap when response_json is True.
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
-        "response_format": {"type": "json_object"},
         "max_tokens": MAX_ANALYSIS_TOKENS,
     }
+    if response_json:
+        payload["response_format"] = {"type": "json_object"}
     try:
         async with httpx.AsyncClient(timeout=_timeout()) as c:
             r = await c.post(f"{base_url}/chat/completions", headers=headers, json=payload)
@@ -144,11 +150,14 @@ async def _openai_style(
     )
 
 
-async def complete_openrouter(key: str, prompt: str, model: str | None = None) -> Completion:
+async def complete_openrouter(
+    key: str, prompt: str, model: str | None = None, response_json: bool = True
+) -> Completion:
     return await _openai_style(
         "openrouter", "https://openrouter.ai/api/v1", key, prompt,
         model or DEFAULT_MODELS["openrouter"],
         extra_headers={"HTTP-Referer": "https://akira.ai", "X-Title": "Akira AI"},
+        response_json=response_json,
     )
 
 

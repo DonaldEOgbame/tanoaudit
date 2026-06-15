@@ -9,12 +9,55 @@
   const API = window.AkiraAPI;
   const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3, info: 4, opt: 5 };
 
+  function getDiffHighlights(codeA, codeB) {
+    if (!codeA) return { vuln: [], added: [] };
+    const linesA = codeA.split("\n").map(l => l.trim());
+    const linesB = (codeB || "").split("\n").map(l => l.trim());
+    const N = linesA.length;
+    const M = linesB.length;
+
+    const dp = Array.from({ length: N + 1 }, () => Array(M + 1).fill(0));
+
+    for (let i = 1; i <= N; i++) {
+      for (let j = 1; j <= M; j++) {
+        if (linesA[i - 1] === linesB[j - 1] && linesA[i - 1] !== "") {
+          dp[i][j] = dp[i - 1][j - 1] + 1;
+        } else {
+          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+      }
+    }
+
+    const vuln = [];
+    const added = [];
+
+    let i = N, j = M;
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && linesA[i - 1] === linesB[j - 1] && linesA[i - 1] !== "") {
+        i--;
+        j--;
+      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+        added.push(j - 1);
+        j--;
+      } else if (i > 0 && (j === 0 || dp[i - 1][j] >= dp[i][j - 1])) {
+        vuln.push(i - 1);
+        i--;
+      }
+    }
+
+    return {
+      vuln: vuln.reverse(),
+      added: added.reverse()
+    };
+  }
+
   // Map a backend FindingOut into the shape this report UI renders (the old demo
   // shape). engine security|optimization|stub -> type; severity -> sev (opt rows
   // use sev "opt"). Exposed so report-tabs.jsx / chat.jsx reuse it.
   function normalizeFinding(f) {
     const type = f.engine === "optimization" ? "opt" : f.engine === "stub" ? "stub" : "vuln";
     const sev = type === "opt" ? "opt" : (f.severity || "info").toLowerCase();
+    const hl = getDiffHighlights(f.code_snippet, f.fix_snippet);
     return {
       id: f.id,
       type,
@@ -37,8 +80,8 @@
       verified: !!f.verified_by,
       stubCategory: f.stub_category || "",
       effort: "",
-      added: f.fixed_at || "",
-      vuln: "",
+      added: hl.added,
+      vuln: hl.vuln,
       current: f.code_snippet || "",
       status: f.status,
       _raw: f,
@@ -48,6 +91,15 @@
 
   // Build the META object (repo header + scores) from a backend ScanOut.
   function metaFromScan(s) {
+    let summaryText = s.executive_summary || "";
+    if (summaryText.trim().startsWith("{")) {
+      try {
+        const parsed = JSON.parse(summaryText);
+        if (parsed && parsed.summary) {
+          summaryText = parsed.summary;
+        }
+      } catch (e) {}
+    }
     return {
       id: s.id,
       repo: s.repo || s.source_url || "scan",
@@ -61,7 +113,7 @@
       optScore: s.optimization_score != null ? s.optimization_score : 0,
       stubScore: s.completeness_score != null ? s.completeness_score : 0,
       worst: s.worst_severity || "info",
-      summary: s.executive_summary || "",
+      summary: summaryText,
       status: s.status,
     };
   }
@@ -81,7 +133,7 @@
     }
   }
 
-  function ScanReport({ nav, toast, justScanned, scanId, repo }) {
+  function ScanReport({ nav, toast, justScanned, scanId, repo, onLoadRepo }) {
     const [tab, setTab] = useState("overview");
     const [selFile, setSelFile] = useState(null);
     const [suppressed, setSuppressed] = useState({});
@@ -96,6 +148,9 @@
     useEffect(() => {
       if (!scanId) {
         setState({ loading: false, error: null, meta: window.VS_REPO_META, findings: window.VS_FINDINGS });
+        if (onLoadRepo && window.VS_REPO_META && window.VS_REPO_META.repo) {
+          onLoadRepo(window.VS_REPO_META.repo);
+        }
         return;
       }
       let alive = true;
@@ -108,6 +163,9 @@
         .then(([scan, finds, wList]) => {
           if (!alive) return;
           const meta = metaFromScan(scan);
+          if (onLoadRepo && meta.repo) {
+            onLoadRepo(meta.repo);
+          }
           const isWatched = meta.repository_id ? (wList || []).some((w) => w.id === meta.repository_id) : false;
           setWatched(isWatched);
           setState({
@@ -222,7 +280,7 @@
               h(Tag, null, META.branch + " @ " + META.commit)),
             h("div", { style: { fontSize: 12.5, color: "var(--text-3)", marginTop: 5, display: "flex", gap: 14, flexWrap: "wrap" } },
               h("span", null, META.files + " files"), h("span", null, META.segments + " segments"),
-              h("span", null, META.duration), h("span", null, "3 models"))),
+              META.duration && h("span", null, META.duration))),
           // Actions
           h("div", { style: { display: "flex", gap: 8, position: "relative" } },
             h("button", { className: "btn btn-sm" + (watched ? " btn-primary" : " btn-secondary"),
@@ -250,8 +308,8 @@
         tab === "overview" && h(OverviewTab, { setTab, meta: META, findings: ALL }),
         (tab === "findings" || tab === "optimizations" || tab === "stubs") && h(window.FindingsTab, { key: tab, mode: tab, selFile, setSelFile, suppressed, setSuppressed, toast, nav, findings: ALL, meta: META }),
         tab === "dependencies" && h(window.DepsTab, { meta: META }),
-        tab === "aigen" && h(window.AiGenTab, { meta: META, findings: ALL }),
-        tab === "history" && h(window.HistoryTab, { justScanned, meta: META })),
+        tab === "aigen" && h(window.AiGenTab, { meta: META }),
+        tab === "history" && h(window.HistoryTab, { meta: META })),
     );
   }
   window.ScanReport = ScanReport;
@@ -311,7 +369,7 @@
     // Backend origin (strip the /api/v1 suffix from the client base).
     const base = (window.AkiraAPI && window.AkiraAPI.BASE.replace(/\/api\/v1$/, "")) || "http://localhost:8000";
     const auditId = (meta && meta.id) || scanId || "scan-1";
-    const mcpAdd = "claude mcp add --transport http akira " + base + "/api/v1/mcp";
+    const mcpAdd = "claude mcp add --transport http akira " + base + "/mcp";
 
     async function generate() {
       if (!scanId) { setUrl(base + "/handoff/" + auditId + "?token=demo"); setPhase("generated"); return; }
@@ -403,9 +461,10 @@
   }
 
   // ================= FILE TREE =================
-  function FileTree({ files, filter, effFile, setSelFile, isOpt }) {
+  function FileTree({ files, filter, effFile, setSelFile, isOpt, repoName }) {
+    const rootName = repoName ? repoName.split("/").pop() : "repo";
     const tree = useMemo(() => {
-      const root = { name: "ecommerce-api", children: {}, files: [] };
+      const root = { name: rootName, children: {}, files: [] };
       files.forEach(([filePath, info]) => {
         const parts = filePath.split("/");
         let node = root;
@@ -558,8 +617,8 @@
       h("div", { style: { borderRight: "1px solid var(--border)", overflowY: "auto", padding: "14px 10px", background: "var(--bg-sidebar)" } },
         h("div", { style: { display: "flex", alignItems: "center", gap: 5, padding: "2px 8px 8px", fontSize: 11, color: "var(--text-3)", fontFamily: "var(--font-mono)", fontWeight: 600 } },
           h(Icons.folder, { size: 12, style: { color: "var(--text-3)" } }),
-          "ecommerce-api/"),
-        h(FileTree, { files, filter: "all", effFile, setSelFile, isOpt }),
+          (meta && meta.repo ? meta.repo.split("/").pop() : "repo") + "/"),
+        h(FileTree, { files, filter: "all", effFile, setSelFile, isOpt, repoName: meta && meta.repo }),
         h("div", { style: { padding: "12px 10px 4px", fontSize: 11, color: "var(--text-3)", lineHeight: 1.6, borderTop: "1px solid var(--border)", marginTop: 10 } },
           h("kbd", { className: "mono", style: { background: "var(--bg-active)", padding: "1px 5px", borderRadius: 4 } }, "J"), "/",
           h("kbd", { className: "mono", style: { background: "var(--bg-active)", padding: "1px 5px", borderRadius: 4 } }, "K"), " navigate · ",

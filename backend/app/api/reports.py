@@ -28,7 +28,6 @@ from app.schemas.report import (
     ReportOut,
     ShareLinkOut,
 )
-from app.services.dispatch import enqueue
 from app.services.exporters import EXPORTERS
 from app.services.scan_diff import diff_findings
 
@@ -90,13 +89,11 @@ async def create_export(
     db.add(report)
     await db.flush()
     report_id = report.id
-    # Render in the arq worker when available; the export stays EXPORT_PENDING and
-    # the client polls list_exports / download_export until it's EXPORT_READY.
-    # Commit first so the worker process sees the row. Fall back to an in-process
-    # BackgroundTask (still off the request's critical path) when arq is absent.
+    # The export renders in a BackgroundTask (off the request's critical path):
+    # it stays EXPORT_PENDING and the client polls list_exports / download_export
+    # until it's EXPORT_READY. Commit first so the row is durable.
     await db.commit()
-    if not await enqueue("export_report_task", report_id=report_id):
-        background.add_task(_render_export_bg, report_id)
+    background.add_task(_render_export_bg, report_id)
     await db.refresh(report)
     return envelope(ReportOut.model_validate(report).model_dump())
 

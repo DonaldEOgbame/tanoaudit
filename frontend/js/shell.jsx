@@ -70,6 +70,37 @@
     }, []);
     const hasScans = scans.length > 0;
 
+    // Live sidebar counters: watchlist alerts, custom-vuln rules, GitHub status.
+    const [meta, setMeta] = useState({ alerts: 0, customCount: null, ghConnected: false });
+    useEffect(() => {
+      const API = window.AkiraAPI;
+      if (!API) return;
+      let alive = true;
+      Promise.allSettled([API.watchlist.alerts(), API.customVulns.list(), API.github.status()])
+        .then(([al, cv, gh]) => {
+          if (!alive) return;
+          const alertsArr = al.status === "fulfilled" ? (al.value && (al.value.items || al.value)) : [];
+          const cvArr = cv.status === "fulfilled" ? (cv.value && (cv.value.items || cv.value)) : null;
+          const ghVal = gh.status === "fulfilled" ? gh.value : null;
+          setMeta({
+            alerts: Array.isArray(alertsArr) ? alertsArr.length : 0,
+            customCount: Array.isArray(cvArr) ? cvArr.length : null,
+            ghConnected: !!(ghVal && (ghVal.connected || ghVal.status === "connected")),
+          });
+        });
+      return () => { alive = false; };
+    }, []);
+
+    // Resolve each NAV row's badge/count/status from live data (falls back to
+    // the static prototype values only when no API is present).
+    function navMeta(n) {
+      if (!window.AkiraAPI) return { badge: n.badge, count: n.count, status: n.status };
+      if (n.page === "watchlist") return { badge: meta.alerts > 0 ? ("↑" + meta.alerts) : null };
+      if (n.page === "custom") return { count: meta.customCount };
+      if (n.page === "integrations") return { status: meta.ghConnected };
+      return {};
+    }
+
     return h("aside", { className: "vs-sidebar" + (collapsed ? " collapsed" : "") },
       // Head
       h("div", { className: "sb-head", style: collapsed ? { justifyContent: "center" } : {} },
@@ -93,15 +124,17 @@
       // Scroll area
       h("div", { className: "sb-scroll" },
         // Top nav items (Watchlist, Reports, etc.)
-        NAV.slice(1).map((n) =>
-          h("button", { key: n.page, className: "sb-item" + (page === n.page ? " active" : ""),
+        NAV.slice(1).map((n) => {
+          const m = navMeta(n);
+          return h("button", { key: n.page, className: "sb-item" + (page === n.page ? " active" : ""),
             onClick: () => nav(n.page), "data-tip": collapsed ? n.section : null },
             h(Icons[n.icon], { size: 17 }),
             !collapsed && h("span", { className: "sbi-label" }, n.section),
-            !collapsed && n.badge && demoState !== "first-run" && h("span", { className: "badge", style: { background: "var(--accent-soft)", color: "var(--accent)", fontSize: 10 } }, n.badge, " new"),
-            !collapsed && n.count != null && h("span", { style: { fontSize: 11, color: "var(--text-3)" } }, n.count),
-            !collapsed && n.status && h("span", { className: "pulse-dot", style: { width: 7, height: 7, borderRadius: "50%", background: "var(--sev-clean)" }, "data-tip": "Connected" }),
-          )),
+            !collapsed && m.badge && demoState !== "first-run" && h("span", { className: "badge", style: { background: "var(--accent-soft)", color: "var(--accent)", fontSize: 10 } }, m.badge, " new"),
+            !collapsed && m.count != null && h("span", { style: { fontSize: 11, color: "var(--text-3)" } }, m.count),
+            !collapsed && m.status && h("span", { className: "pulse-dot", style: { width: 7, height: 7, borderRadius: "50%", background: "var(--sev-clean)" }, "data-tip": "Connected" }),
+          );
+        }),
 
         // Search / cmd — above Scans
         !collapsed && h("div", { style: { padding: "8px 2px 2px" } },
@@ -146,19 +179,32 @@
 
   function ProfilePopover({ onClose, openSettings, collapsed, user, onLogout }) {
     const ref = useRef();
+    const [pos, setPos] = useState(null);
     useEffect(() => {
       const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
       setTimeout(() => document.addEventListener("mousedown", onDoc), 0);
       return () => document.removeEventListener("mousedown", onDoc);
     }, []);
+    // When collapsed, measure the foot element to position with fixed coords
+    useEffect(() => {
+      if (collapsed && ref.current) {
+        const parent = ref.current.parentElement;
+        if (parent) {
+          const rect = parent.getBoundingClientRect();
+          setPos({ bottom: window.innerHeight - rect.top + 6, left: rect.left });
+        }
+      }
+    }, [collapsed]);
     const items = [
       { label: "Settings", icon: "settings", sec: "general" },
-      { label: "API Keys", icon: "key", sec: "apikeys" },
       { label: "Usage & Limits", icon: "chart", sec: "usage" },
       { label: "Help & Docs", icon: "help", sec: "help" },
       { label: "What's New", icon: "sparkle", sec: "help" },
     ];
-    return h("div", { ref, className: "popover", style: { bottom: "calc(100% + 6px)", left: 8, right: collapsed ? "auto" : 8, width: collapsed ? 220 : "auto" } },
+    const popStyle = collapsed && pos
+      ? { position: "fixed", bottom: pos.bottom, left: pos.left, width: 220, zIndex: 9999 }
+      : { bottom: "calc(100% + 6px)", left: 8, right: 8, width: "auto" };
+    return h("div", { ref, className: "popover", style: popStyle },
       h("div", { style: { padding: "8px 10px 6px" } },
         h("div", { style: { fontSize: 12.5, fontWeight: 600 } }, displayName(user)),
         h("div", { style: { fontSize: 11.5, color: "var(--text-3)" } }, (user && user.email) || "alex@acme.dev"),
@@ -199,7 +245,6 @@
       commands.push({ type: "Navigate", label, icon, action: () => nav(page) }));
     commands.push({ type: "Action", label: "Start a New Scan", icon: "plus", action: onNewScan });
     commands.push({ type: "Action", label: "Open Settings", icon: "settings", action: () => openSettings("general") });
-    commands.push({ type: "Action", label: "API Keys", icon: "key", action: () => openSettings("apikeys") });
 
     const filtered = q.trim() === "" ? commands.slice(0, 8) :
       commands.filter((c) => c.label.toLowerCase().includes(q.toLowerCase()) || (c.hint || "").toLowerCase().includes(q.toLowerCase())).slice(0, 30);

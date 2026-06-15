@@ -6,6 +6,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.services.model_catalog import DEFAULT_TIER
+
 
 class ScanCreate(BaseModel):
     source_type: Literal["github", "url", "zip"]
@@ -14,7 +16,9 @@ class ScanCreate(BaseModel):
     branch: Optional[str] = None
     depth: Literal["fast", "deep", "thorough"] = "deep"
     model_mode: Literal["auto", "manual"] = "auto"
-    models: list[str] = Field(default_factory=lambda: ["gemini", "openrouter"])
+    # Akira model tier ids (see services/model_catalog.py). Unknown ids are
+    # ignored at resolve time; "auto" mode uses the default tier regardless.
+    models: list[str] = Field(default_factory=lambda: [DEFAULT_TIER])
     include_custom: bool = True
     include_optimization: bool = True
 

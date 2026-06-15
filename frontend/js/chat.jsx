@@ -161,20 +161,23 @@ Is there a specific finding, file, or category you'd like me to explain?`;
 
   // ===== Markdown =====
   function parseInline(text, onRef) {
-    const regex = /(\*\*[^*\n]+\*\*|`[^`\n]+`|VS-\d{3,4}|OPT-\d{3,4}|STB-\d{3,4}|src\/\S+\.\w+)/g;
+    const regex = /(\*\*[^*\n]+\*\*|`[^`\n]+`|(?:VS|VLN|OPT|STB)[-\u2011]\d{3,4}|src\/\S+\.\w+|<[bB][rR]\s*\/?>)/g;
     const parts = []; let last = 0, m;
     while ((m = regex.exec(text)) !== null) {
       if (m.index > last) parts.push(text.slice(last, m.index));
       const t = m[0];
       if (t.startsWith("**")) parts.push(h("strong", { key: m.index }, t.slice(2, -2)));
       else if (t.startsWith("`")) parts.push(h("code", { key: m.index, style: { fontSize: 12, padding: "1px 5px", background: "var(--bg-active)", borderRadius: 4, fontFamily: "var(--font-mono)" } }, t.slice(1, -1)));
-      else if (t.match(/^(VS|OPT|STB)-\d+$/)) {
-        const f = ALL ? ALL.find(x => x.id === t) : null;
-        const sev = f ? f.sev : "info";
+      else if (t.match(/^(VS|VLN|OPT|STB)[-\u2011]\d+$/)) {
+        const normalizedId = t.replace("\u2011", "-");
+        const f = ALL ? ALL.find(x => x.id === normalizedId) : null;
+        const sev = f ? f.sev : (normalizedId.startsWith("OPT") ? "opt" : normalizedId.startsWith("STB") ? "stub" : "info");
         const sd = (SEV && SEV[sev]) || { color: "var(--text-2)", bg: "var(--bg-active)" };
-        parts.push(h("button", { key: m.index, onClick: () => onRef && onRef(t, sev), style: { display: "inline-flex", alignItems: "center", background: sd.bg, color: sd.color, border: "1px solid color-mix(in srgb," + sd.color + " 30%,transparent)", padding: "1px 7px", borderRadius: 99, fontSize: 11, fontWeight: 650, fontFamily: "var(--font-mono)", cursor: "pointer", verticalAlign: "middle", transition: "transform 80ms ease" }, onMouseEnter: e => e.currentTarget.style.transform = "scale(1.06)", onMouseLeave: e => e.currentTarget.style.transform = "" }, t));
+        parts.push(h("button", { key: m.index, onClick: () => onRef && onRef(normalizedId, sev), style: { display: "inline-flex", alignItems: "center", background: sd.bg, color: sd.color, border: "1px solid color-mix(in srgb," + sd.color + " 30%,transparent)", padding: "1px 7px", borderRadius: 99, fontSize: 11, fontWeight: 650, fontFamily: "var(--font-mono)", cursor: "pointer", verticalAlign: "middle", transition: "transform 80ms ease" }, onMouseEnter: e => e.currentTarget.style.transform = "scale(1.06)", onMouseLeave: e => e.currentTarget.style.transform = "" }, normalizedId));
       } else if (t.startsWith("src/")) {
         parts.push(h("button", { key: m.index, onClick: () => onRef && onRef(t, "file"), style: { display: "inline-flex", alignItems: "center", gap: 3, color: "var(--sev-low)", fontFamily: "var(--font-mono)", fontSize: 12, cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted", background: "none", border: "none", padding: 0, verticalAlign: "middle" } }, h(Icons.file, { size: 11 }), t));
+      } else if (t.match(/^<[bB][rR]\s*\/?>$/)) {
+        parts.push(h("br", { key: m.index }));
       }
       last = m.index + t.length;
     }
@@ -182,9 +185,27 @@ Is there a specific finding, file, or category you'd like me to explain?`;
     return h(React.Fragment, null, ...parts);
   }
 
+  function preProcessHtml(text) {
+    if (!text) return "";
+    let s = text;
+    // Replace list items with markdown bullet points
+    s = s.replace(/<li\b[^>]*>/gi, "\n- ");
+    s = s.replace(/<\/li>/gi, "");
+    s = s.replace(/<ol\b[^>]*>/gi, "\n");
+    s = s.replace(/<\/ol>/gi, "");
+    s = s.replace(/<ul\b[^>]*>/gi, "\n");
+    s = s.replace(/<\/ul>/gi, "");
+    s = s.replace(/<p\b[^>]*>/gi, "\n");
+    s = s.replace(/<\/p>/gi, "");
+    // Remove extra consecutive newlines that might be introduced
+    s = s.replace(/\n{3,}/g, "\n\n");
+    return s;
+  }
+
   function renderMarkdown(text, onRef) {
     if (!text) return null;
-    const lines = text.split("\n");
+    const cleanText = preProcessHtml(text);
+    const lines = cleanText.split("\n");
     const out = []; let i = 0, k = 0;
     while (i < lines.length) {
       const line = lines[i];
@@ -192,6 +213,93 @@ Is there a specific finding, file, or category you'd like me to explain?`;
         const code = []; i++;
         while (i < lines.length && !lines[i].startsWith("```")) { code.push(lines[i]); i++; }
         out.push(h("pre", { key: k++, style: { background: "var(--bg-inset)", border: "1px solid var(--border)", borderRadius: "var(--r-md)", padding: "10px 14px", fontSize: 12, overflow: "auto", margin: "6px 0", fontFamily: "var(--font-mono)", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-all" } }, code.join("\n")));
+        i++; continue;
+      }
+      if (line.trim().startsWith("|")) {
+        const tableLines = [];
+        while (i < lines.length && lines[i].trim().startsWith("|")) {
+          tableLines.push(lines[i].trim());
+          i++;
+        }
+        if (tableLines.length >= 2) {
+          const parseRow = (rowStr) => {
+            const cells = rowStr.split("|").map(c => c.trim());
+            if (cells[0] === "") cells.shift();
+            if (cells[cells.length - 1] === "") cells.pop();
+            return cells;
+          };
+          const headers = parseRow(tableLines[0]);
+          const isSep = tableLines[1].split("|").every(cell => {
+            const c = cell.trim();
+            return c === "" || /^-+$/.test(c);
+          });
+          if (isSep) {
+            const rows = [];
+            for (let r = 2; r < tableLines.length; r++) {
+              rows.push(parseRow(tableLines[r]));
+            }
+            const tableStyle = {
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: 12.5,
+              margin: "12px 0 16px",
+              lineHeight: 1.5,
+            };
+            const thStyle = {
+              borderBottom: "2px solid var(--border-strong)",
+              padding: "8px 10px",
+              textAlign: "left",
+              fontWeight: 650,
+              color: "var(--text-1)",
+              background: "var(--bg-inset)",
+            };
+            const tdStyle = {
+              borderBottom: "1px solid var(--border)",
+              padding: "8px 10px",
+              color: "var(--text-2)",
+            };
+            const getCellStyle = (baseStyle, text) => {
+              const trimmed = (text || "").trim();
+              const hasBr = /<[bB][rR]\s*\/?>/.test(trimmed);
+              const shouldNoWrap = (trimmed.length < 30 && !hasBr);
+              if (shouldNoWrap) {
+                return { ...baseStyle, whiteSpace: "nowrap" };
+              }
+              return baseStyle;
+            };
+            out.push(h("div", { key: k++, style: { overflowX: "auto" } },
+              h("table", { style: tableStyle },
+                h("thead", null,
+                  h("tr", null,
+                    headers.map((hText, idx) => h("th", { key: idx, style: getCellStyle(thStyle, hText) }, parseInline(hText, onRef)))
+                  )
+                ),
+                h("tbody", null,
+                  rows.map((rowCells, rIdx) =>
+                    h("tr", { key: rIdx },
+                      rowCells.map((cellText, cIdx) => h("td", { key: cIdx, style: getCellStyle({ ...tdStyle, verticalAlign: "top" }, cellText) }, parseInline(cellText, onRef)))
+                    )
+                  )
+                )
+              )
+            ));
+            continue;
+          }
+        }
+        i -= tableLines.length;
+      }
+      const hMatch = line.match(/^(#{1,6})\s+(.*)$/);
+      if (hMatch) {
+        const level = hMatch[1].length;
+        const content = hMatch[2];
+        const tag = "h" + level;
+        const style = {
+          marginTop: level === 1 ? 16 : level === 2 ? 14 : 10,
+          marginBottom: 6,
+          fontWeight: 650,
+          fontSize: level === 1 ? 17 : level === 2 ? 15.5 : level === 3 ? 14.5 : 13.5
+        };
+        out.push(h(tag, { key: k++, style }, parseInline(content, onRef)));
         i++; continue;
       }
       if (!line.trim()) { out.push(h("div", { key: k++, style: { height: 5 } })); i++; continue; }
@@ -258,15 +366,60 @@ Is there a specific finding, file, or category you'd like me to explain?`;
     const API = window.AkiraAPI;
     const META = meta || window.VS_REPO_META;
     const scanId = META && META.id && meta ? META.id : null; // only treat as real when meta came from a scan
-    // Seed the first AI message from the real executive summary when available.
-    const initial = React.useMemo(() => (
-      scanId && META.summary
-        ? [{ id: 0, role: "ai", text: META.summary, initial: true }]
-        : INIT_MSGS
-    ), [scanId]);
+    const storageKey = scanId ? "akira:chat:" + scanId : "akira:chat:demo";
+
+    const getBaseInitial = React.useCallback(() => {
+      if (scanId && META.summary) {
+        let text = META.summary;
+        if (text.trim().startsWith("{")) {
+          try {
+            const parsed = JSON.parse(text);
+            if (parsed && parsed.summary) {
+              text = parsed.summary;
+            }
+          } catch (e) {}
+        }
+        return [{ id: 0, role: "ai", text, initial: true }];
+      }
+      return INIT_MSGS;
+    }, [scanId, META.summary]);
+
+    const initial = React.useMemo(() => {
+      const cached = localStorage.getItem(storageKey);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
+        } catch (e) {}
+      }
+      return getBaseInitial();
+    }, [storageKey, getBaseInitial]);
+
     const [messages, setMessages] = useState(initial);
+
+    useEffect(() => {
+      setMessages(initial);
+    }, [initial]);
+
+    useEffect(() => {
+      const cleanMessages = messages.filter(m => !m.thinking);
+      localStorage.setItem(storageKey, JSON.stringify(cleanMessages));
+    }, [messages, storageKey]);
     const [input, setInput] = useState("");
     const [streaming, setStreaming] = useState(false);
+    // Akira model tiers for the chat engine selector.
+    const [tiers, setTiers] = useState([]);
+    const [tier, setTier] = useState(null);
+    useEffect(() => {
+      if (!API) return;
+      let alive = true;
+      API.scans.models()
+        .then((d) => { if (alive) { const ts = (d && d.tiers) || []; setTiers(ts); setTier((d && d.default) || (ts[0] && ts[0].id) || null); } })
+        .catch(() => {});
+      return () => { alive = false; };
+    }, []);
     const [editingId, setEditingId] = useState(null);
     const [hoveredMsg, setHoveredMsg] = useState(null);
     const [showScrollDown, setShowScrollDown] = useState(false);
@@ -331,20 +484,39 @@ Is there a specific finding, file, or category you'd like me to explain?`;
       setStreaming(true);
       setTimeout(() => scrollToBottom(), 60);
 
-      // Real scan: ask the backend. Otherwise fall back to the canned demo reply.
+      // Real scan: stream the answer token-by-token from the backend (SSE).
+      // Otherwise fall back to the canned demo reply.
       if (scanId && API) {
         const history = messages
           .filter((m) => !m.thinking && !m.initial && (m.role === "user" || m.role === "ai"))
           .map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text }));
-        API.chat.send(scanId, q, history)
-          .then((res) => {
-            const text = (res && (res.reply || res.message || res.answer || res.content)) || "(no response)";
-            setMessages(p => p.map(m => m.id === aid ? { ...m, thinking: false, text } : m));
+        let acc = "";
+        let n = 0;
+        const ctl = API.chat.send(scanId, q, history, (evt) => {
+          if (evt && typeof evt === "object") {
+            if (evt.done) {
+              setStreaming(false);
+              setTimeout(() => { taRef.current && taRef.current.focus(); scrollToBottom(); }, 80);
+              return;
+            }
+            if (evt.delta) {
+              acc += evt.delta; n++;
+              setMessages(p => p.map(m => m.id === aid ? { ...m, thinking: false, text: acc } : m));
+              if (n % 8 === 0) scrollToBottom();
+            }
+          } else if (typeof evt === "string") {
+            acc += evt;
+            setMessages(p => p.map(m => m.id === aid ? { ...m, thinking: false, text: acc } : m));
+          }
+        }, tier);
+        ctl.promise
+          .then(() => {
+            setMessages(p => p.map(m => m.id === aid ? { ...m, thinking: false, text: acc || "(no response)" } : m));
             setStreaming(false);
             setTimeout(() => { taRef.current && taRef.current.focus(); scrollToBottom(); }, 80);
           })
           .catch((e) => {
-            setMessages(p => p.map(m => m.id === aid ? { ...m, thinking: false, text: "⚠️ " + ((e && e.message) || "Chat failed.") } : m));
+            setMessages(p => p.map(m => m.id === aid ? { ...m, thinking: false, text: acc || ("⚠️ " + ((e && e.message) || "Chat failed.")) } : m));
             setStreaming(false);
           });
         return;
@@ -397,9 +569,12 @@ Is there a specific finding, file, or category you'd like me to explain?`;
                 h("div", { style: { width: 26, height: 26, borderRadius: 7, background: "var(--accent-soft)", color: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 } }, h(Icons.sparkle, { size: 13 })),
                 h("div", { style: { flex: 1, minWidth: 0 } },
                   h("div", { style: { background: "var(--bg-raised)", border: "1px solid var(--border)", padding: "11px 15px", borderRadius: "3px 14px 14px 14px", fontSize: 13.5, color: "var(--text-1)", lineHeight: 1.55, wordBreak: "break-word" } },
-                    // Gauges live inside the first summary message
+                    // Gauges live inside the first summary message.
+                    // Security RISK = 100 − security_score: higher = more risk (BAD),
+                    // so a high gauge lights more red ticks. Optimization and
+                    // Completeness are shown as-is (higher = better).
                     m.initial && h("div", { style: { display: "flex", justifyContent: "center", gap: 28, padding: "4px 0 14px", marginBottom: 12, borderBottom: "1px solid var(--border)", flexWrap: "wrap" } },
-                      h(window.SegmentArc, { value: META.score, size: 100, label: "Security Risk", color: "oklch(58% 0.26 18)", sublabel: "/ 100" }),
+                      h(window.SegmentArc, { value: Math.max(0, Math.min(100, 100 - (META.score || 0))), size: 100, label: "Security Risk", color: "oklch(58% 0.26 18)", sublabel: "/ 100" }),
                       h(window.SegmentArc, { value: META.optScore, size: 100, label: "Optimization", color: "oklch(58% 0.28 280)", sublabel: "/ 100" }),
                       h(window.SegmentArc, { value: META.stubScore, size: 100, label: "Completeness", color: "oklch(64% 0.13 180)", sublabel: "/ 100" })),
                     m.thinking ? h(ThinkingDots) : renderMarkdown(m.text, onRef)),
@@ -410,7 +585,7 @@ Is there a specific finding, file, or category you'd like me to explain?`;
                     CHIPS.map((c, i) => h("button", { key: c, className: "chat-chip", style: { animationDelay: i * 55 + "ms", textAlign: "left" }, onClick: () => send(c) }, c)))))),
 
         // Scroll-to-bottom
-        showScrollDown && h("button", { className: "chat-scroll-down", onClick: () => scrollToBottom() }, h(Icons.chevD, { size: 13 }), "Latest"))),
+        showScrollDown && h("button", { className: "chat-scroll-down", style: { alignSelf: "center" }, onClick: () => scrollToBottom() }, h(Icons.chevD, { size: 13 }), "Latest"))),
 
       // Composer — inner content centered to the same 740px column
       h("div", { style: { flexShrink: 0, padding: "8px 24px 14px" } },
@@ -425,9 +600,8 @@ Is there a specific finding, file, or category you'd like me to explain?`;
             placeholder: editingId !== null ? "Edit your message\u2026" : "Ask anything about this scan\u2026",
             onChange: e => { setInput(e.target.value); resizeTa(); }, onKeyDown }),
 
-          // Toolbar row inside the box: + on the left, send on the right
+          // Toolbar row inside the box: engine selector on the left, clear + send right
           h("div", { style: { display: "flex", alignItems: "center", gap: 8, marginTop: 4 } },
-            h("button", { className: "composer-tool", type: "button", title: "Attach context", onClick: () => {} }, h(Icons.plus, { size: 16 })),
             h("div", { style: { flex: 1 } }),
             messages.length > 1 && !streaming && h("div", { style: { position: "relative" } },
               h("button", { className: "btn btn-ghost btn-sm", style: { fontSize: 11.5, color: "var(--text-3)" }, onClick: () => setClearOpen(v => !v) }, "Clear"),
@@ -436,7 +610,15 @@ Is there a specific finding, file, or category you'd like me to explain?`;
                 h("div", { style: { fontSize: 12, color: "var(--text-2)", marginBottom: 10 } }, "Resets to the initial summary."),
                 h("div", { style: { display: "flex", gap: 6 } },
                   h("button", { className: "btn btn-ghost btn-sm", onClick: () => setClearOpen(false) }, "Cancel"),
-                  h("button", { className: "btn btn-danger btn-sm", onClick: () => { setMessages(INIT_MSGS); setClearOpen(false); setStreaming(false); setEditingId(null); clearInterval(ivRef.current); } }, "Reset")))),
+                  h("button", { className: "btn btn-danger btn-sm", onClick: () => {
+                    const base = getBaseInitial();
+                    setMessages(base);
+                    localStorage.removeItem(storageKey);
+                    setClearOpen(false);
+                    setStreaming(false);
+                    setEditingId(null);
+                    if (ivRef.current) clearInterval(ivRef.current);
+                  } }, "Reset")))),
             h("button", { className: "composer-send", disabled: !input.trim() || streaming, onClick: () => send(), title: "Send" },
               streaming
                 ? h("div", { className: "spinner", style: { width: 14, height: 14, borderTopColor: "var(--accent-text)" } })

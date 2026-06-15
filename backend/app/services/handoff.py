@@ -53,12 +53,35 @@ def handoff_url(audit_id: str, raw_token: str) -> str:
     return f"{settings.public_base_url}/handoff/{audit_id}?token={raw_token}"
 
 
+def _dedup(findings: list[Finding]) -> list[Finding]:
+    """Collapse duplicate findings (same logical vuln persisted more than once).
+
+    Two rows that share engine, location, and identity (public_id / cwe /
+    subcategory) describe the same issue; emitting both spams the handoff and
+    inflates finding_count. Keeps the first occurrence and preserves order.
+    """
+    seen: set[tuple] = set()
+    out: list[Finding] = []
+    for f in findings:
+        key = (
+            f.engine, f.public_id, f.file, f.line_start, f.line_end,
+            f.cwe_id, f.subcategory,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(f)
+    return out
+
+
 async def select_findings(
     db: AsyncSession, audit_id: str, scope: str, finding_ids: list[str] | None
 ) -> list[Finding]:
-    rows = (
-        await db.execute(select(Finding).where(Finding.scan_id == audit_id))
-    ).scalars().all()
+    rows = _dedup(
+        (
+            await db.execute(select(Finding).where(Finding.scan_id == audit_id))
+        ).scalars().all()
+    )
 
     if scope == SCOPE_ALL:
         return rows
@@ -159,6 +182,8 @@ def _render_stub_block(f: Finding) -> str:
         f"- **Lines:** {f.line_start}–{f.line_end}",
         f"- **Category:** {f.stub_category or cat}",
     ]
+    if f.confidence:
+        lines.append(f"- **Confidence:** {f.confidence}")
     if f.risk_if_shipped:
         lines.append(f"- **Risk if shipped:** {f.risk_if_shipped}")
     lines.append("")
@@ -193,7 +218,8 @@ def render_handoff_markdown(scan: Scan, findings: list[Finding]) -> str:
     ]
 
     blocks = []
-    for f in findings:
+    # Group by engine so the body matches the header summary ordering.
+    for f in [*sec, *opt, *stub]:
         if f.engine == ENGINE_STUB:
             blocks.append(_render_stub_block(f))
             continue
@@ -206,6 +232,8 @@ def render_handoff_markdown(scan: Scan, findings: list[Finding]) -> str:
             f"- **Lines:** {f.line_start}–{f.line_end}",
             f"- **Category:** {cat}{sub}",
         ]
+        if f.confidence:
+            lines.append(f"- **Confidence:** {f.confidence}")
         if f.cwe_id:
             lines.append(f"- **CWE:** {f.cwe_id}")
         if f.owasp_ref:
@@ -214,6 +242,8 @@ def render_handoff_markdown(scan: Scan, findings: list[Finding]) -> str:
         lines.append("**Description:**")
         lines.append(f.explanation or "(no description)")
         lines.append("")
+        if f.impact:
+            lines += ["**Impact:**", f.impact, ""]
         if f.code_snippet:
             lines += ["**Current code:**", "```", f.code_snippet, "```", ""]
         if f.fix_snippet or f.fix_summary:

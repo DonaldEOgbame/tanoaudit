@@ -38,12 +38,20 @@
   function emit() { listeners.forEach((fn) => { try { fn(); } catch (e) {} }); }
   function onAuthChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 
-  // A surfaced API error: carries the backend's code + message + HTTP status.
+  // A surfaced API error: carries the backend's code + message + HTTP status,
+  // plus any extra fields from the error object (e.g. resets_in_seconds on a
+  // daily_limit_reached 429).
   class ApiError extends Error {
-    constructor(code, message, status) {
+    constructor(code, message, status, details) {
       super(message || code || "Request failed");
       this.code = code;
       this.status = status;
+      this.details = details || null;
+      if (details && typeof details === "object") {
+        for (const k in details) {
+          if (k !== "code" && k !== "message" && !(k in this)) this[k] = details[k];
+        }
+      }
     }
   }
 
@@ -53,10 +61,14 @@
     if (refreshing) return refreshing;
     const rt = tokens.refresh;
     if (!rt) return Promise.reject(new ApiError("unauthorized", "Not authenticated", 401));
+    // Timeout the refresh too, so a hung backend can't wedge the boot flow.
+    const rc = new AbortController();
+    const rtimer = setTimeout(() => rc.abort(), 8000);
     refreshing = fetch(BASE + "/auth/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refresh_token: rt }),
+      signal: rc.signal,
     })
       .then((r) => r.json().then((b) => ({ r, b })))
       .then(({ r, b }) => {
@@ -67,7 +79,11 @@
         tokens.set(b.data.access_token, b.data.refresh_token);
         return b.data.access_token;
       })
-      .finally(() => { refreshing = null; });
+      .catch((e) => {
+        if (e && e.name === "AbortError") { tokens.clear(); throw new ApiError("timeout", "Session refresh timed out", 0); }
+        throw e;
+      })
+      .finally(() => { clearTimeout(rtimer); refreshing = null; });
     return refreshing;
   }
 
@@ -83,11 +99,20 @@
     const useAuth = opts.auth !== false;
     if (useAuth && tokens.access) headers["Authorization"] = "Bearer " + tokens.access;
 
+    // Guard every request with a timeout so a down/hung backend rejects (and the
+    // app can fall back to the auth screen) instead of spinning forever. Callers
+    // may pass opts.timeoutMs; default is 60s to match long analysis requests.
+    const timeoutMs = opts.timeoutMs || 60000;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     let res;
     try {
-      res = await fetch(BASE + path, { method: opts.method || "GET", headers, body });
+      res = await fetch(BASE + path, { method: opts.method || "GET", headers, body, signal: controller.signal });
     } catch (e) {
+      if (e && e.name === "AbortError") throw new ApiError("timeout", "The server took too long to respond", 0);
       throw new ApiError("network_error", "Could not reach the server", 0);
+    } finally {
+      clearTimeout(timer);
     }
 
     // Transparent refresh-and-retry once on 401.
@@ -111,6 +136,7 @@
         err ? err.code : "http_error",
         err ? err.message : ("HTTP " + res.status),
         res.status,
+        err,
       );
     }
     // Enveloped success → unwrap .data; tolerate bare bodies too.
@@ -158,11 +184,8 @@
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        // SSE frames are separated by a blank line; data lines start with "data:".
+      // Process every complete "data:" line currently in buf.
+      const drain = () => {
         let nl;
         while ((nl = buf.indexOf("\n")) >= 0) {
           const line = buf.slice(0, nl).replace(/\r$/, "");
@@ -173,7 +196,19 @@
           let data; try { data = JSON.parse(raw); } catch (e) { data = raw; }
           if (onEvent) onEvent(data);
         }
+      };
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        drain();
       }
+      // Flush any trailing decoder state + a final line with no trailing newline,
+      // so the LAST SSE event (often the most important — e.g. research_completed,
+      // chat done) is never dropped when the stream closes mid-buffer.
+      buf += decoder.decode();
+      if (buf && !buf.endsWith("\n")) buf += "\n";
+      drain();
     };
     const promise = run(false);
     return { promise, abort() { controller.abort(); } };
@@ -202,8 +237,45 @@
       if (rt) { try { await post("/auth/logout", { refresh_token: rt }, { auth: false }); } catch (e) {} }
       tokens.clear();
     },
-    me() { return get("/profile"); },
+    // Boot-time session check: short timeout so an unreachable backend drops the
+    // user to the auth screen quickly instead of an indefinite "Loading…".
+    me() { return get("/profile", { timeoutMs: 8000 }); },
     isAuthed() { return !!tokens.access; },
+    // Start "Sign in with GitHub": fetch the authorize URL, then hand the
+    // browser off to GitHub. On return the backend redirects to <frontend>/#…
+    // with tokens, consumed by consumeAuthRedirect() below.
+    async githubStart() {
+      const data = await get("/auth/github/start", { auth: false });
+      if (data && data.authorize_url) window.location.assign(data.authorize_url);
+      return data;
+    },
+    // Pick up tokens the backend put in the URL fragment after GitHub sign-in.
+    // Returns true if a session was established. Also surfaces ?auth=error.
+    consumeAuthRedirect() {
+      try {
+        const frag = (window.location.hash || "").replace(/^#/, "");
+        if (frag) {
+          const p = new URLSearchParams(frag);
+          const at = p.get("access_token");
+          const rt = p.get("refresh_token");
+          if (at && rt) {
+            tokens.set(at, rt);
+            history.replaceState({}, document.title,
+              window.location.pathname + window.location.search);
+            return { ok: true };
+          }
+        }
+        const q = new URLSearchParams(window.location.search);
+        if (q.get("auth") === "error") {
+          const msg = q.get("message") || "Sign-in failed.";
+          ["auth", "message"].forEach((k) => q.delete(k));
+          history.replaceState({}, document.title,
+            window.location.pathname + (q.toString() ? "?" + q : "") + window.location.hash);
+          return { error: msg };
+        }
+      } catch (e) { /* ignore */ }
+      return null;
+    },
   };
 
   // --- scans ---------------------------------------------------------------
@@ -222,12 +294,20 @@
       const q = new URLSearchParams(params || {}).toString();
       return get("/scans" + (q ? "?" + q : ""));
     },
+    // Akira model tiers for the selector: { tiers:[{id,label,description}], default }.
+    models() { return get("/scans/models"); },
+    // Rolling-24h scan usage vs cap: { used, limit, remaining, resets_in_seconds }.
+    limit() { return get("/scans/limit"); },
     get(id) { return get("/scans/" + id); },
     remove(id) { return del("/scans/" + id); },
     findings(id, params) {
       const q = new URLSearchParams(params || {}).toString();
       return get("/scans/" + id + "/findings" + (q ? "?" + q : ""));
     },
+    // Dependency inventory: { items:[...], summary:{total,vulnerable,outdated,clean} }.
+    dependencies(id) { return get("/scans/" + id + "/dependencies"); },
+    // AI-generation composition derived from real findings.
+    aigen(id) { return get("/scans/" + id + "/ai-generation"); },
     control(id, command) {
       return post("/scans/" + id + "/control?command=" + encodeURIComponent(command));
     },
@@ -295,7 +375,12 @@
   // --- scoped report chat --------------------------------------------------
   const chat = {
     history(scanId) { return get("/scans/" + scanId + "/chat"); },     // info + counters
-    send(scanId, message, messages) { return post("/scans/" + scanId + "/chat", { message, messages: messages || [] }); },
+    // SSE stream: onEvent receives { delta } chunks then { done: true }.
+    // Returns { promise, abort() }. Mirrors findings.generateFix.
+    // `tier` is an optional Akira model tier id (from scans.models()).
+    send(scanId, message, messages, onEvent, tier) {
+      return stream("/scans/" + scanId + "/chat", { message, messages: messages || [], tier: tier || null }, onEvent);
+    },
   };
 
   // --- custom vulnerabilities ----------------------------------------------
@@ -336,7 +421,7 @@
     status() { return get("/github/status"); },
     // Returns { authorize_url, state }; the page should redirect to authorize_url.
     authorize() { return get("/github/authorize"); },
-    disconnect() { return del("/github/disconnect"); },
+    disconnect() { return post("/github/disconnect", {}); },
     repos() { return get("/github/repos"); },
     setTriggers(body) { return patch("/github/triggers", body); },
     setIssueSettings(body) { return patch("/github/issue-settings", body); },
@@ -367,13 +452,10 @@
   // --- usage ----------------------------------------------------------------
   const usage = { get() { return get("/usage"); } };
 
-  // --- settings (api keys, models, privacy) ---------------------------------
+  // --- settings (model preference, privacy) ---------------------------------
+  // No API keys: the server holds provider keys; users pick Akira model tiers.
   const settings = {
-    getApiKeys() { return get("/settings/api-keys"); },
-    putApiKeys(body) { return request("/settings/api-keys", { method: "PUT", body }); }, // { provider, key }
-    testApiKey(provider) { return post("/settings/api-keys/" + provider + "/test", {}); },
-    deleteApiKey(provider) { return del("/settings/api-keys/" + provider); },
-    getModels() { return get("/settings/models"); },
+    getModels() { return get("/settings/models"); },          // { default_tier }
     putModels(body) { return request("/settings/models", { method: "PUT", body }); },
     getPrivacy() { return get("/settings/privacy"); },
     putPrivacy(body) { return request("/settings/privacy", { method: "PUT", body }); },
@@ -404,7 +486,9 @@
   };
 
   // --- fun facts (optional; live-scan trivia) -------------------------------
-  const funFacts = { get() { return get("/fun-facts"); } };
+  // Pull the full shuffled pool (server caps at 100) so a long scan cycles through
+  // the whole set, not just the default batch of 20.
+  const funFacts = { get(count) { return get("/fun-facts?count=" + (count || 100)); } };
 
   window.AkiraAPI = {
     BASE, ApiError,

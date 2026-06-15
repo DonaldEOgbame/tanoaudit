@@ -114,18 +114,22 @@ async def test_verification_downgrades_on_disagreement(monkeypatch):
         return Completion(text='{"confirmed": false, "reason": "benign"}', provider="openrouter", model="x")
 
     _completers(monkeypatch, {"openrouter": verifier, "gemini": verifier})
-    r = ModelRouter(keys={"gemini": "k", "openrouter": "k"}, order=["gemini", "openrouter"])
+    r = ModelRouter(
+        keys={"gemini": "k", "openrouter": "k"}, order=["gemini", "openrouter"],
+        tier_labels={"gemini": "Akira Fast", "openrouter": "Akira Balanced"},
+    )
 
     f = Finding(
         scan_id="s", public_id="VLN-0001", engine=ENGINE_SECURITY,
         category="Injection", severity="critical", confidence="High",
         file="a.js", line_start=1, line_end=3, code_snippet="db.raw(x)",
-        explanation="raw sql", model_attribution="Gemini 2.0 Flash",
+        explanation="raw sql", model_attribution="Akira Fast",
     )
     await verify_criticals([f], r, None)
     assert f.severity == "high"
     assert "Downgraded from Critical" in (f.explanation or "")
-    assert f.verified_by == "OpenRouter / Claude Haiku"
+    # Verified by a *different* tier than the one that found it (no vendor name).
+    assert f.verified_by == "Akira Balanced"
 
 
 async def test_verification_confirms(monkeypatch):
@@ -133,13 +137,16 @@ async def test_verification_confirms(monkeypatch):
         return Completion(text='{"confirmed": true}', provider="openrouter", model="x")
 
     _completers(monkeypatch, {"openrouter": verifier, "gemini": verifier})
-    r = ModelRouter(keys={"gemini": "k", "openrouter": "k"}, order=["gemini", "openrouter"])
+    r = ModelRouter(
+        keys={"gemini": "k", "openrouter": "k"}, order=["gemini", "openrouter"],
+        tier_labels={"gemini": "Akira Fast", "openrouter": "Akira Balanced"},
+    )
     f = Finding(
         scan_id="s", public_id="VLN-0001", engine=ENGINE_SECURITY,
         category="Injection", severity="critical", confidence="High",
         file="a.js", line_start=1, line_end=3, code_snippet="x",
-        explanation="e", model_attribution="Gemini 2.0 Flash",
+        explanation="e", model_attribution="Akira Fast",
     )
     await verify_criticals([f], r, None)
     assert f.severity == "critical"
-    assert f.verified_by == "OpenRouter / Claude Haiku"
+    assert f.verified_by == "Akira Balanced"

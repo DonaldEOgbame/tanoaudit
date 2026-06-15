@@ -119,28 +119,26 @@ async def callback_redirect(
     state: str = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Browser-friendly callback for manual testing.
+    """Browser callback for the GitHub OAuth round-trip.
 
-    GitHub redirects the browser here (a GET) after the user authorizes. The
-    real product will redirect to the SPA, which POSTs to /callback; until that
-    frontend exists, this GET does the exchange server-side and shows a simple
-    result page so the whole flow can be exercised in a browser.
+    GitHub redirects the browser here (a GET) after the user authorizes. We do
+    the code exchange server-side, then redirect back into the SPA with a status
+    flag so the app lands on the Integrations page and shows the result, instead
+    of dead-ending on a raw backend page.
     """
-    from fastapi.responses import HTMLResponse
+    from urllib.parse import urlencode
 
+    from fastapi.responses import RedirectResponse
+
+    base = settings.frontend_url.rstrip("/")
     try:
-        user_id, conn = await _exchange_and_store(code, state, db)
-    except Exception as exc:  # noqa: BLE001 — render the error, don't 500 the browser
+        _user_id, conn = await _exchange_and_store(code, state, db)
+    except Exception as exc:  # noqa: BLE001 — bounce the browser back with an error
         detail = getattr(exc, "detail", str(exc))
-        return HTMLResponse(
-            f"<h2>GitHub connection failed</h2><pre>{detail}</pre>", status_code=400
-        )
-    return HTMLResponse(
-        "<h2>✅ GitHub connected</h2>"
-        f"<p>Account: <b>{conn.github_username}</b></p>"
-        f"<p>Scopes: <code>{conn.scopes}</code></p>"
-        "<p>You can close this tab. Check <code>GET /api/v1/github/status</code> to confirm.</p>"
-    )
+        qs = urlencode({"github": "error", "message": str(detail)[:300]})
+        return RedirectResponse(url=f"{base}/?{qs}", status_code=303)
+    qs = urlencode({"github": "connected", "account": conn.github_username or ""})
+    return RedirectResponse(url=f"{base}/?{qs}", status_code=303)
 
 
 def _status_payload(conn: GitHubConnection | None, user_id: str) -> dict:
@@ -255,13 +253,38 @@ async def update_status_check(
 @router.patch("/repo-access")
 async def update_repo_access(
     body: RepoAccessUpdate,
+    background: BackgroundTasks,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     conn = await _require_conn(db, user.id)
+    prev_selected = set((conn.repo_access or {}).get("selected") or [])
     conn.repo_access = {"mode": body.mode, "selected": body.selected}
     await db.flush()
+
+    # Auto-register the Akira webhook on newly-selected repos so events actually
+    # reach us. create_webhook is idempotent (a duplicate hook is a no-op), and
+    # this runs in the background so the settings save stays snappy.
+    if body.mode == "selected":
+        newly = set(body.selected or []) - prev_selected
+        if newly:
+            token = decrypt_secret(conn.encrypted_token)
+            background.add_task(
+                _register_webhooks, token, list(newly),
+                _webhook_url(user.id), conn.webhook_secret,
+            )
     return envelope(conn.repo_access)
+
+
+async def _register_webhooks(
+    token: str, repos: list[str], payload_url: str, secret: str
+) -> None:
+    """Best-effort webhook registration across a set of repos."""
+    for full in repos:
+        try:
+            await gh.create_webhook(token, full, payload_url, secret)
+        except Exception:  # noqa: BLE001 — best-effort; a failure mustn't break others
+            continue
 
 
 # ---- Issues -----------------------------------------------------------------

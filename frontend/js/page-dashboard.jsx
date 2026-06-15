@@ -123,7 +123,7 @@
     );
   }
 
-  function Dashboard({ demoState, nav, onNewScan, onSample, user }) {
+  function Dashboard({ demoState, nav, onNewScan, onSample, openSettings, user }) {
     const [state, setState] = useState({ loading: true, error: null, scans: null, usage: null });
 
     const load = useCallback(async () => {
@@ -155,7 +155,7 @@
     const total = (state.scans && state.scans.total) || items.length;
 
     // First-run / empty state keyed off whether the user has any scans.
-    if (items.length === 0) return h(FirstRun, { firstName, onNewScan, onSample });
+    if (items.length === 0) return h(FirstRun, { firstName, onNewScan, onSample, nav, openSettings });
 
     return h(ReturningDashboard, { items, total, usage: state.usage, firstName, nav, onNewScan });
   }
@@ -169,9 +169,10 @@
       return st === "running" || st === "in_progress" || st === "queued" || st === "pending";
     });
 
-    // Avg security score across completed scans (real scores).
-    const avgScore = completed.length
-      ? Math.round(completed.reduce((a, s) => a + (s.security_score || 0), 0) / completed.length)
+    // Avg security RISK across completed scans (risk = 100 − stored score).
+    // Higher = worse, consistent with the rest of the app.
+    const avgRisk = completed.length
+      ? Math.round(completed.reduce((a, s) => a + window.riskFromScore(s.security_score), 0) / completed.length)
       : 0;
 
     const scansThisMonth = usage && usage.scans_this_month != null ? usage.scans_this_month : null;
@@ -200,8 +201,8 @@
           sub: scansThisMonth != null ? ("+" + scansThisMonth + " this month") : (running.length ? running.length + " in progress" : null),
         }),
         h(Stat, {
-          label: "Avg. security score", value: avgScore, suffix: "/100",
-          color: scoreColor(avgScore), icon: "shield",
+          label: "Avg. security risk", value: avgRisk, suffix: "/100",
+          color: window.riskColor(avgRisk), icon: "shield",
           sub: completed.length + " completed scan" + (completed.length === 1 ? "" : "s"),
         }),
         h(Stat, {
@@ -260,7 +261,7 @@
           ),
           h("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 13 } },
             h("thead", null, h("tr", { style: { color: "var(--text-3)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" } },
-              ["Repository", "Score", "Segments", "Scanned"].map((c, i) =>
+              ["Repository", "Risk", "Segments", "Scanned"].map((c, i) =>
                 h("th", { key: c, style: { textAlign: i > 0 ? "right" : "left", padding: "8px 18px", fontWeight: 600 } }, c)))),
             h("tbody", null, recent.map((s) => {
               const st = (s.status || "").toLowerCase();
@@ -275,7 +276,7 @@
                   h(SevDot, { sev: sevKey(s.worst_severity) }), h("span", { style: { fontWeight: 550 } }, s.repo)),
                 h("td", { style: { textAlign: "right", padding: "11px 18px" } },
                   isDone
-                    ? h("span", { style: { fontWeight: 650, color: scoreColor(s.security_score || 0), fontVariantNumeric: "tabular-nums" } }, s.security_score)
+                    ? (function () { const risk = window.riskFromScore(s.security_score); return h("span", { style: { fontWeight: 650, color: window.riskColor(risk), fontVariantNumeric: "tabular-nums" } }, risk); })()
                     : h("span", { style: { color: "var(--text-3)", textTransform: "capitalize" } }, st || "—")),
                 h("td", { style: { textAlign: "right", padding: "11px 18px", fontVariantNumeric: "tabular-nums", color: "var(--text-2)" } },
                   (s.segments_analyzed || 0) + "/" + (s.segment_total || 0)),
@@ -307,12 +308,26 @@
   }
 
   // ---- First-run onboarding ----
-  function FirstRun({ firstName, onNewScan, onSample }) {
-    const [done, setDone] = useState({ 1: false, 2: false, 3: false });
+  function FirstRun({ firstName, onNewScan, onSample, nav, openSettings }) {
+    // Step 1 (Connect GitHub) reflects the real connection status, not just a
+    // click in this session — so a returning user who already linked GitHub sees
+    // it marked done. Step 2 (first scan) is inherently incomplete here, since
+    // FirstRun only renders when the user has zero scans. `clicked` lets a
+    // freshly-completed action show "Done" without a refetch.
+    const [ghConnected, setGhConnected] = useState(false);
+    const [clicked, setClicked] = useState({ 1: false, 2: false });
+    useEffect(() => {
+      let alive = true;
+      API.github.status()
+        .then((s) => { if (alive && s && s.connected) setGhConnected(true); })
+        .catch(() => {});
+      return () => { alive = false; };
+    }, []);
+
+    const done = { 1: ghConnected || clicked[1], 2: clicked[2] };
     const steps = [
       { n: 1, title: "Connect GitHub", desc: "Authorize Akira AI to read the repositories you want to scan.", cta: "Connect", icon: "github" },
-      { n: 2, title: "Add your free API keys", desc: "Bring keys for Gemini or OpenRouter — both have generous free tiers.", cta: "Add keys", icon: "key" },
-      { n: 3, title: "Run your first scan", desc: "Point Akira AI at a repo and watch both engines go to work.", cta: "New scan", icon: "shield" },
+      { n: 2, title: "Run your first scan", desc: "Point Akira AI at a repo and watch both engines go to work.", cta: "New scan", icon: "shield" },
     ];
     const completedCount = Object.values(done).filter(Boolean).length;
 
@@ -330,10 +345,10 @@
       // Onboarding card
       h("div", { className: "card", style: { padding: 24, marginBottom: 18 } },
         h("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 } },
-          h("h3", { style: { fontSize: 15, fontWeight: 650 } }, "Get started in 3 steps"),
-          h("span", { style: { fontSize: 12.5, color: "var(--text-2)" } }, completedCount + " of 3 complete"),
+          h("h3", { style: { fontSize: 15, fontWeight: 650 } }, "Get started in 2 steps"),
+          h("span", { style: { fontSize: 12.5, color: "var(--text-2)" } }, completedCount + " of 2 complete"),
         ),
-        h("div", { style: { marginBottom: 16 } }, h(ProgressBar, { value: (completedCount / 3) * 100 })),
+        h("div", { style: { marginBottom: 16 } }, h(ProgressBar, { value: (completedCount / 2) * 100 })),
         h("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
           steps.map((s) => {
             const isDone = done[s.n];
@@ -354,7 +369,12 @@
               isDone
                 ? h("span", { className: "badge", style: { background: "var(--sev-clean-bg)", color: "var(--sev-clean)" } }, h(Icons.check, { size: 12 }), "Done")
                 : h("button", { className: "btn btn-secondary btn-sm", onClick: () => {
-                    if (s.n === 3) { onNewScan(); } else { setDone((d) => Object.assign({}, d, { [s.n]: true })); }
+                    // Step 1's done-state is driven by the real GitHub connection,
+                    // not the click — navigating to Integrations doesn't itself
+                    // connect anything. Step 2 opens the scan modal immediately, so
+                    // mark it optimistically.
+                    if (s.n === 1) { nav && nav("integrations"); }
+                    else { setClicked((d) => Object.assign({}, d, { 2: true })); onNewScan(); }
                   } }, s.cta),
             );
           })),

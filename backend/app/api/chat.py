@@ -24,7 +24,7 @@ from app.models.chat import ChatLog
 from app.models.scan import Finding, Scan
 from app.models.user import User
 from app.schemas.chat import ChatInfo, ChatRequest
-from app.services.router_factory import build_router_for_user
+from app.services.router_factory import build_router_for_chat
 from app.services.scoped_chat import (
     REFUSAL,
     build_messages,
@@ -129,7 +129,7 @@ async def chat(
     history = [{"role": m.role, "content": m.content} for m in body.messages]
     messages = build_messages(system_prompt, history, body.message)
     prompt = flatten_for_completion(messages)
-    router_obj = await build_router_for_user(user_id)
+    router_obj = await build_router_for_chat(user_id, body.tier, purpose="chat")
     message_text = body.message
 
     summary_fallback = scan.executive_summary or "No findings context is available to answer that."

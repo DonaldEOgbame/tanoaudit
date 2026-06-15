@@ -1,6 +1,4 @@
 // Akira AI — Learning Hub, Integrations
-// TODO(no-endpoint): VS_TEAM (team activity) has no backend (see WIRING.md Gaps).
-// It is intentionally not wired here and not rendered.
 (function () {
   const React = window.React;
   const { useState, useEffect } = React;
@@ -296,6 +294,20 @@
     const issueSettings = (status && status.issue_settings) || {};
     const statusCheck = (status && status.status_check) || {};
     const repoAccess = (status && status.repo_access) || { mode: "all", selected: [] };
+    const selectedSet = new Set(repoAccess.selected || []);
+
+    // Toggle a repo in/out of the "selected" allow-list and persist immediately.
+    function toggleSelectedRepo(fullName) {
+      const next = new Set(repoAccess.selected || []);
+      if (next.has(fullName)) next.delete(fullName);
+      else next.add(fullName);
+      patchSettings(
+        API.github.setRepoAccess,
+        { mode: "selected", selected: Array.from(next) },
+        "repo_access",
+        "Repository access updated"
+      );
+    }
 
     // ----- Connection card -----
     let connectionCard;
@@ -351,14 +363,35 @@
             onClick: () => patchSettings(API.github.setRepoAccess, { mode: "selected", selected: repoAccess.selected || [] }, "repo_access", "Repository access updated") }, "Selected repositories",
             repoAccess.mode === "selected" && h("div", { className: "sel-check" }, h(Icons.check, { size: 13, sw: 2.5 }))),
         ),
+        repoAccess.mode === "selected"
+          ? h("div", { style: { fontSize: 11.5, color: "var(--text-3)", marginBottom: 8 } },
+              "Click repositories to include them in auto-scans"
+                + (selectedSet.size ? " — " + selectedSet.size + " selected" : " — none selected (auto-scan is off)"))
+          : null,
         reposLoading
           ? h("div", { className: "empty-state", style: { padding: "16px 0" } }, h("div", { className: "spinner" }))
           : reposErr
             ? h("div", { style: { fontSize: 12, color: "var(--sev-critical)" } }, reposErr)
             : (repos && repos.length > 0)
               ? h("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
-                  repos.slice(0, 8).map((r) => h(Tag, { key: r.full_name }, r.full_name)),
-                  repos.length > 8 && h("span", { style: { fontSize: 12, color: "var(--text-3)", alignSelf: "center" } }, "+" + (repos.length - 8) + " more"))
+                  (repoAccess.mode === "selected" ? repos : repos.slice(0, 8)).map((r) => {
+                    if (repoAccess.mode !== "selected") return h(Tag, { key: r.full_name }, r.full_name);
+                    const isOn = selectedSet.has(r.full_name);
+                    return h("button", {
+                      key: r.full_name,
+                      type: "button",
+                      className: "tag",
+                      onClick: () => toggleSelectedRepo(r.full_name),
+                      style: {
+                        cursor: "pointer",
+                        border: "1px solid " + (isOn ? "var(--accent)" : "var(--border)"),
+                        background: isOn ? "var(--accent-soft)" : "transparent",
+                        color: isOn ? "var(--accent)" : "var(--text-2)",
+                        display: "inline-flex", alignItems: "center", gap: 5,
+                      },
+                    }, isOn && h(Icons.check, { size: 11, sw: 2.5 }), r.full_name);
+                  }),
+                  repoAccess.mode !== "selected" && repos.length > 8 && h("span", { style: { fontSize: 12, color: "var(--text-3)", alignSelf: "center" } }, "+" + (repos.length - 8) + " more"))
               : h("div", { style: { fontSize: 12, color: "var(--text-3)" } }, "No repositories found for this account.")),
       h(Section, { title: "Auto-scan triggers", desc: "Run scans automatically on repository events." },
         h(Row, { label: "On push to default branch", on: triggers.on_push, set: (v) => patchSettings(API.github.setTriggers, { on_push: v }, "triggers", "Triggers updated") }),

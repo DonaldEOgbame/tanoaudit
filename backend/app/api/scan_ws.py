@@ -17,15 +17,23 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import SessionLocal
+from app.models.scan import (
+    SCAN_CANCELLED,
+    SCAN_COMPLETED,
+    SCAN_FAILED,
+    Scan,
+)
 from app.core.security import ACCESS, decode_token
-from app.models.scan import Scan
 from app.services import scan_events as ev
 
 router = APIRouter(tags=["scans"])
 
+# Scan statuses from which no further events will ever be published.
+_TERMINAL = {SCAN_COMPLETED, SCAN_FAILED, SCAN_CANCELLED}
 
-async def _authorize(scan_id: str, token: str | None) -> str | None:
-    """Return user_id if the token is valid and owns the scan, else None."""
+
+async def _authorize(scan_id: str, token: str | None) -> Scan | None:
+    """Return the owned Scan if the token is valid and owns it, else None."""
     if not token:
         return None
     try:
@@ -37,18 +45,63 @@ async def _authorize(scan_id: str, token: str | None) -> str | None:
         scan = await db.get(Scan, scan_id)
     if scan is None or scan.user_id != user_id:
         return None
-    return user_id
+    return scan
+
+
+def _terminal_event(scan: Scan) -> dict | None:
+    """Synthesize the terminal event for an already-finished scan, so a late
+    joiner (or a reconnect after the in-memory event buffer was lost, e.g. a
+    server restart, or a scan run in a separate worker process) still learns the
+    real outcome instead of spinning at 0% forever."""
+    if scan.status == SCAN_COMPLETED:
+        return {"type": ev.SCAN_COMPLETED, "payload": {
+            "security_score": scan.security_score,
+            "optimization_score": scan.optimization_score,
+            "segments_unparsed": scan.segments_unparsed,
+            "report_id": scan.id,
+        }}
+    if scan.status == SCAN_FAILED:
+        return {"type": ev.SCAN_FAILED, "payload": {"error": scan.error or "Scan failed."}}
+    if scan.status == SCAN_CANCELLED:
+        return {"type": ev.SCAN_CANCELLED, "payload": {}}
+    return None
 
 
 @router.websocket("/scans/{scan_id}/ws")
 async def scan_ws(websocket: WebSocket, scan_id: str):
     token = websocket.query_params.get("token")
-    user_id = await _authorize(scan_id, token)
-    if user_id is None:
+    scan = await _authorize(scan_id, token)
+    if scan is None:
         await websocket.close(code=4401)  # unauthorized
         return
 
     await websocket.accept()
+
+    # If the scan already finished, the in-memory event buffer may be empty (late
+    # join, a server restart, or a scan run in a separate worker process). Send
+    # the DB-derived terminal event and close — the client transitions to its
+    # done/error state.
+    if scan.status in _TERMINAL:
+        buffered = await ev.bus.replay(scan_id)
+        for evt in buffered:
+            await websocket.send_json(evt)
+        # Only synthesize the terminal event if the replay didn't already carry
+        # one (avoids a duplicate scan_failed/completed for in-process late joins).
+        already_terminal = any(
+            e.get("type") in (ev.SCAN_COMPLETED, ev.SCAN_FAILED, ev.SCAN_CANCELLED)
+            for e in buffered
+        )
+        if not already_terminal:
+            term = _terminal_event(scan)
+            if term is not None:
+                await websocket.send_json(term)
+        await websocket.close()
+        return
+
+    # Subscribe BEFORE replaying, so any event published in the gap between the
+    # status read above and now is delivered live through the queue rather than
+    # missed (if the scan terminates here, its terminal event arrives on the
+    # subscription and the client transitions normally).
     queue = await ev.bus.subscribe(scan_id)
 
     # Replay buffered events so a late joiner sees prior progress.

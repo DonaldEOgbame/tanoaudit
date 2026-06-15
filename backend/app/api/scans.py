@@ -1,7 +1,10 @@
 """Module 3 router: create scans (JSON config or ZIP upload), list, get, findings.
 
-Scans run in a FastAPI BackgroundTask for Module 3. A durable worker (arq/celery)
-is introduced when scan orchestration needs to survive restarts (later module).
+Scans are queued in the DB and run in a FastAPI BackgroundTask (same process as
+the WebSocket, so progress streams live). The in-process maintenance loop
+(`app.worker.run_maintenance_loop`, started by the API) is the safety net: it
+atomically claims any QUEUED scan an API restart left behind and runs it through
+the same orchestrator.
 """
 from __future__ import annotations
 
@@ -26,9 +29,9 @@ from app.core.ratelimit import rate_limit
 from app.models.scan import Finding, Scan
 from app.models.user import User
 from app.schemas.scan import FindingOut, ScanCreate, ScanOut
-from app.services import ingestion, scan_events as ev
-from app.services.dispatch import enqueue
+from app.services import ingestion, model_catalog, scan_events as ev
 from app.services.orchestrator import run_scan
+from app.services.usage import daily_scan_status, enforce_daily_scan_limit
 from app.services.repositories import link_scan_to_repo
 
 router = APIRouter(prefix="/scans", tags=["scans"])
@@ -64,17 +67,19 @@ async def create_scan(
     if body.source_type == "github" and not body.repo:
         raise bad_request("repo is required for github scans")
 
+    # Hard daily cap (before creating the row, so the new scan isn't self-counted).
+    await enforce_daily_scan_limit(db, user.id)
+
     scan = _new_scan(user.id, body)
     db.add(scan)
     await db.flush()
     await link_scan_to_repo(db, scan)
     scan_id = scan.id
-    # github/url scans are self-contained (the worker re-clones), so they can run
-    # in the arq worker. Commit first so the separate worker process sees the row;
-    # fall back to an in-process BackgroundTask when arq isn't available.
+    # Commit first so the row (QUEUED) is durable: a separate polling worker can
+    # claim it, and the in-process BackgroundTask below runs it immediately when
+    # this process stays up.
     await db.commit()
-    if not await enqueue("run_scan_task", scan_id=scan_id):
-        background.add_task(run_scan, scan_id)
+    background.add_task(run_scan, scan_id)
     return envelope(ScanOut.model_validate(scan).model_dump())
 
 
@@ -96,6 +101,9 @@ async def upload_scan(
     cfg_data["source_type"] = "zip"
     cfg = ScanCreate.model_validate(cfg_data)
 
+    # Hard daily cap (before creating the row, so the new scan isn't self-counted).
+    await enforce_daily_scan_limit(db, user.id)
+
     scan = _new_scan(user.id, cfg)
     scan.repo = scan.repo or (file.filename or "upload.zip").rsplit(".", 1)[0]
     db.add(scan)
@@ -104,15 +112,30 @@ async def upload_scan(
     scan_id = scan.id
 
     # Extract synchronously (bytes are in-request) into the shared, scan-id-keyed
-    # upload dir, which a separate arq worker can read. The scan then flows
-    # through the same run_scan_task(scan_id) enqueue as github/url (materialize
-    # finds the upload dir by id); in-process BackgroundTask fallback otherwise.
+    # upload dir, which a separate polling worker can also read. The scan then
+    # flows through run_scan(scan_id) (materialize finds the upload dir by id).
     workdir = ingestion.scan_upload_dir(scan_id)
     ingestion.extract_zip(raw, workdir)
     await db.commit()
-    if not await enqueue("run_scan_task", scan_id=scan_id):
-        background.add_task(run_scan, scan_id)
+    background.add_task(run_scan, scan_id)
     return envelope(ScanOut.model_validate(scan).model_dump())
+
+
+@router.get("/models")
+async def list_model_tiers(user: User = Depends(get_current_user)):
+    """The Akira model tiers a user can pick for a scan/chat. Exposes only
+    id/label/description — never the underlying provider or concrete model."""
+    return envelope({"tiers": model_catalog.public_tiers(),
+                     "default": model_catalog.DEFAULT_TIER})
+
+
+@router.get("/limit")
+async def get_scan_limit(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The user's rolling-24h scan usage vs the daily cap (for the UI)."""
+    return envelope(await daily_scan_status(db, user.id))
 
 
 @router.get("")
@@ -255,3 +278,68 @@ async def list_findings(
         stmt = stmt.where(Finding.status == status)
     rows = (await db.execute(stmt)).scalars().all()
     return envelope([FindingOut.model_validate(f).model_dump() for f in rows])
+
+
+@router.get("/{scan_id}/dependencies")
+async def list_dependencies(
+    scan_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Dependency inventory for a scan: declared packages enriched with latest
+    versions and OSV advisories. Returns a summary + the per-package list."""
+    from app.models.dependency import (
+        STATUS_CLEAN,
+        STATUS_OUTDATED,
+        STATUS_VULNERABLE,
+        ScanDependency,
+    )
+
+    await _owned_scan(db, scan_id, user.id)
+    rows = (
+        await db.execute(
+            select(ScanDependency).where(ScanDependency.scan_id == scan_id)
+        )
+    ).scalars().all()
+    items = [r.as_dict() for r in rows]
+    summary = {
+        "total": len(items),
+        "vulnerable": sum(1 for r in rows if r.status == STATUS_VULNERABLE),
+        "outdated": sum(1 for r in rows if r.status == STATUS_OUTDATED),
+        "clean": sum(1 for r in rows if r.status == STATUS_CLEAN),
+    }
+    return envelope({"items": items, "summary": summary})
+
+
+@router.get("/{scan_id}/ai-generation")
+async def ai_generation(
+    scan_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """AI-generation *signals* for a scan.
+
+    Intentionally does NOT report a "% AI-generated" composition: reliable
+    AI-vs-human code detection isn't currently possible (even research-grade
+    detectors are ~84% in a lab and fail on clean, polished AI code), so any
+    percentage would be false precision. We return only the concrete, defensible
+    signals — counts of patterns commonly left by code-generation tools — plus the
+    risk `delta` (a real finding-density ratio). The UI sums the pattern counts.
+
+    `percent` is still included for backward compatibility but is deprecated and
+    should not be presented as a composition figure."""
+    from app.services.ai_generation import analyze
+
+    scan = await _owned_scan(db, scan_id, user.id)
+    findings = (
+        await db.execute(select(Finding).where(Finding.scan_id == scan_id))
+    ).scalars().all()
+    payload = analyze(list(findings), scan.files or 0)
+    # Total concrete signals = sum of pattern counts (what the UI surfaces).
+    payload["signal_count"] = sum(p.get("count", 0) for p in payload.get("patterns", []))
+    payload["basis"] = (
+        "Counts of patterns commonly associated with machine-generated code, from "
+        "this scan's findings. Not a composition estimate — reliable AI-vs-human "
+        "code detection is not currently possible."
+    )
+    return envelope(payload)

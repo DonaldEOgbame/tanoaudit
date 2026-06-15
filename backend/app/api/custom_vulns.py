@@ -117,7 +117,11 @@ async def research(
         ):
             if event_type == RESEARCH_COMPLETED:
                 definition = payload.get("definition")
-            yield f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
+            # Embed the event name in the data payload too: the frontend SSE
+            # helper only reads `data:` lines (not the `event:` line), so the
+            # stage is carried inside the JSON for the research animation.
+            data = {"event": event_type, **payload}
+            yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
         # Persist the structured definition.
         if definition is not None:
@@ -138,6 +142,6 @@ async def research(
                     v.source_urls = definition["source_urls"]
                     v.researched = True
                     await s.commit()
-                    yield f"event: saved\ndata: {json.dumps({'id': v.id})}\n\n"
+                    yield f"event: saved\ndata: {json.dumps({'event': 'saved', 'id': v.id})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

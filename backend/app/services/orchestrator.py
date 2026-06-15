@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shutil
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.config import settings
 from app.core.database import SessionLocal, utcnow
@@ -20,8 +21,10 @@ from app.models.scan import (
     ENGINE_SECURITY,
     ENGINE_STUB,
     SCAN_CANCELLED,
+    SCAN_CLAIMED,
     SCAN_COMPLETED,
     SCAN_FAILED,
+    SCAN_QUEUED,
     SCAN_RUNNING,
     STATUS_INTENTIONAL,
     Finding,
@@ -74,13 +77,37 @@ async def _drain_router_events(scan_id: str, router: ModelRouter | None) -> None
 _DEPTH_LIMITS = {"fast": 120, "deep": 400, "thorough": 800}
 
 
+# An empty-but-valid single-segment analysis (the per-segment result shape).
+_EMPTY_RESULT = (
+    '{"security": [], "optimizations": [], "stubs": [], '
+    '"segment_scores": {"security_risk": 0, "optimization_score": 100, '
+    '"completeness_score": 100}}'
+)
+# Matches the per-segment headers build_batch_prompt emits ("### SEGMENT 0 — ...").
+_SEGMENT_HEADER_RE = re.compile(r"^### SEGMENT (\d+) ", re.MULTILINE)
+
+
 async def default_complete(prompt: str, model_hint: str | None) -> str:
     """Placeholder provider. Returns an empty-but-valid analysis.
 
     Replaced by the real multi-model router in Module 4. Kept valid so the
     pipeline runs end-to-end even with no provider keys configured.
+
+    Critically, this must honor *both* contracts the analyzer uses: a single
+    segment expects one flat result object, but a batch prompt
+    (`build_batch_prompt`) expects ``{"results": {"0": {...}, ...}}`` keyed by
+    index. Returning the flat object for a batch parses to all-None, which forces
+    analyze_batch to split the whole batch down to single segments one call at a
+    time — defeating batching entirely and flooding logs with "segment dropped"
+    warnings. So when we detect batch segment headers, emit the indexed shape with
+    an empty result per segment.
     """
-    return '{"security": [], "optimizations": [], "stubs": [], "segment_scores": {"security_risk": 0, "optimization_score": 100, "completeness_score": 100}}'
+    indices = [int(m) for m in _SEGMENT_HEADER_RE.findall(prompt)]
+    if indices:
+        n = max(indices) + 1
+        results = ",".join(f'"{i}": {_EMPTY_RESULT}' for i in range(n))
+        return f'{{"results": {{{results}}}}}'
+    return _EMPTY_RESULT
 
 
 async def materialize_source(scan: Scan) -> tuple[str, str | None]:
@@ -124,6 +151,25 @@ async def _github_clone_url(user_id: str, repo_full_name: str) -> str:
         except ValueError:
             pass
     return f"https://github.com/{repo_full_name}.git"
+
+
+async def _scan_dependencies(scan_id: str, workdir: str) -> None:
+    """Parse + enrich dependency manifests and persist ScanDependency rows.
+    Fully guarded: any failure is logged and swallowed so the code scan proceeds."""
+    try:
+        from app.services.dependency_scan import analyze_dependencies
+        from app.models.dependency import ScanDependency
+
+        deps = await analyze_dependencies(workdir)
+        if not deps:
+            return
+        async with SessionLocal() as db:
+            for d in deps:
+                db.add(ScanDependency(scan_id=scan_id, **d))
+            await db.commit()
+        logger.info("scan %s: stored %d dependencies", scan_id, len(deps))
+    except Exception:  # noqa: BLE001 — dependency scan is non-critical
+        logger.exception("dependency scan failed for %s", scan_id)
 
 
 def _public_id(engine: str, idx: int) -> str:
@@ -210,13 +256,30 @@ async def run_scan(
         scan = await db.get(Scan, scan_id)
         if scan is None:
             return
-        scan.status = SCAN_RUNNING
-        scan.started_at = utcnow()
-        scan.correlation_id = scan.correlation_id or str(uuid.uuid4())
+        # Atomically transition queued/claimed -> running. The API runs a scan as
+        # a BackgroundTask while the maintenance loop may also claim it; this
+        # guarded UPDATE lets exactly one win (rowcount 0 -> someone else is
+        # already running it, so bail without double-running).
+        res = await db.execute(
+            update(Scan)
+            .where(
+                Scan.id == scan_id,
+                Scan.status.in_([SCAN_QUEUED, SCAN_CLAIMED]),
+            )
+            .values(
+                status=SCAN_RUNNING,
+                started_at=utcnow(),
+                correlation_id=scan.correlation_id or str(uuid.uuid4()),
+            )
+        )
         await db.commit()
+        if not res.rowcount:
+            return
 
-    # Build the real multi-model router from the user's keys unless a provider
-    # callable was injected (tests / placeholder).
+    # Build the multi-model router from the SERVER's provider keys + the scan's
+    # selected Akira tiers, unless a provider callable was injected (tests). With
+    # no server key configured (deploy misconfig), fall back to the empty-result
+    # placeholder so the scan still completes rather than erroring.
     router: ModelRouter | None = None
     if complete is None:
         router = await build_router_for_scan(scan)
@@ -234,6 +297,24 @@ async def run_scan(
             wanted = set(scan.path_filters)
             files = [f for f in files if f.rel_path in wanted]
         segments = segment_files(files)
+
+        # Scan-profile coverage cap: the profile (stored as `depth`) bounds how
+        # many segments we analyze, so Fast/Balanced/Thorough trade cost for
+        # coverage. Larger repos are truncated to the cap; the surplus is
+        # reported as unparsed-but-skipped via segments_unparsed below.
+        cap = _DEPTH_LIMITS.get(scan.depth, _DEPTH_LIMITS["deep"])
+        skipped_for_cap = max(0, len(segments) - cap)
+        if skipped_for_cap:
+            logger.info(
+                "scan %s: profile %r caps at %d segments; truncating %d of %d",
+                scan_id, scan.depth, cap, skipped_for_cap, len(segments),
+            )
+            segments = segments[:cap]
+
+        # Dependency analysis: parse manifests from the working tree and enrich
+        # with latest versions + OSV advisories. Best-effort — failures here must
+        # never abort the code scan, so it's fully guarded.
+        await _scan_dependencies(scan_id, workdir)
         suppressions = await _load_suppressions(scan)
         custom_targets = await _load_custom_vulns(scan)
         intentional_hashes = await _load_intentional_stub_hashes(scan)
@@ -391,7 +472,17 @@ async def run_scan(
             "segments_unparsed": scan.segments_unparsed,
             "report_id": scan_id,
         })
-        await _emit_scan_notifications(scan_id)
+        # Post-completion side-effects must never flip a finished scan to FAILED.
+        # The scan is already finalized and persisted above; a notification or
+        # GitHub-API hiccup here is not a scan failure.
+        try:
+            await _emit_scan_notifications(scan_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: notifications failed (non-fatal)", scan_id)
+        try:
+            await _emit_github_outcomes(scan_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("scan %s: github outcomes failed (non-fatal)", scan_id)
     except _Cancelled:
         async with SessionLocal() as db:
             scan = await db.get(Scan, scan_id)
@@ -446,11 +537,11 @@ async def _emit_scan_notifications(scan_id: str) -> None:
         repository_id = scan.repository_id
         user_id = scan.user_id
         n_crit = len(crits)
-        sec_score = scan.security_score
+        sec_risk = max(0, 100 - (scan.security_score or 0))
 
     await notify(
         user_id, N_SCAN_COMPLETE, f"Scan complete: {repo_name}",
-        f"Security score {sec_score}/100 · {n_crit} critical finding(s).",
+        f"Security risk {sec_risk}/100 · {n_crit} critical finding(s).",
         link={"scan_id": scan_id},
     )
     if n_crit:
@@ -474,6 +565,112 @@ async def _emit_scan_notifications(scan_id: str) -> None:
                         f"{change['new_issues']} new finding(s) in {repo_name}",
                         change["change_label"], link={"repository_id": repository_id},
                     )
+
+
+_SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+
+
+async def _emit_github_outcomes(scan_id: str) -> None:
+    """Post scan results back to GitHub: commit status and (optionally)
+    auto-created issues. Driven entirely by the user's connection settings, and
+    only for scans actually linked to a GitHub repo. Best-effort — a GitHub
+    outage must never fail an otherwise-successful scan."""
+    from app.core.security import decrypt_secret
+    from app.models.github import GitHubConnection
+    from app.services import github_client as gh
+
+    async with SessionLocal() as db:
+        scan = await db.get(Scan, scan_id)
+        if scan is None or scan.source_type != "github" or not scan.repo:
+            return
+        conn = (
+            await db.execute(
+                select(GitHubConnection).where(GitHubConnection.user_id == scan.user_id)
+            )
+        ).scalar_one_or_none()
+        if conn is None:
+            return
+        findings = (
+            await db.execute(
+                select(Finding).where(
+                    Finding.scan_id == scan_id, Finding.engine == ENGINE_SECURITY
+                )
+            )
+        ).scalars().all()
+        repo = scan.repo
+        sha = scan.commit
+        status_check = conn.status_check or {}
+        issue_settings = conn.issue_settings or {}
+        try:
+            token = decrypt_secret(conn.encrypted_token)
+        except ValueError:
+            return
+
+    n_crit = sum(1 for f in findings if (f.severity or "").lower() == "critical")
+
+    # --- Commit status -------------------------------------------------------
+    if status_check.get("post_commit_status") and sha:
+        state = "failure" if n_crit else "success"
+        desc = (f"{n_crit} critical finding(s)" if n_crit
+                else "No critical findings")
+        try:
+            await gh.post_commit_status(
+                token, repo, sha, state,
+                status_check.get("check_name") or "Akira AI security check", desc,
+            )
+        except Exception:  # noqa: BLE001 — best-effort
+            logger.exception("commit status post failed for scan %s", scan_id)
+
+    # --- Auto-create issues --------------------------------------------------
+    if issue_settings.get("auto_create"):
+        threshold = (issue_settings.get("severity_threshold") or "high").lower()
+        cutoff = _SEVERITY_RANK.get(threshold, 3)
+        template = issue_settings.get("template", "{public_id}: {explanation}")
+        base_labels = list(issue_settings.get("labels") or [])
+        label_map = issue_settings.get("label_mapping") or {}
+        assignee = issue_settings.get("assignee")
+
+        to_file = [
+            f for f in findings
+            if _SEVERITY_RANK.get((f.severity or "").lower(), 0) >= cutoff
+            and not f.github_issue_url
+        ]
+        async with SessionLocal() as db:
+            for f in to_file:
+                title, body = _render_issue(f, template)
+                labels = list(base_labels)
+                mapped = label_map.get((f.severity or "").lower())
+                if mapped:
+                    labels.append(mapped)
+                try:
+                    issue = await gh.create_issue(
+                        token, repo, title, body, labels=labels, assignee=assignee
+                    )
+                except Exception:  # noqa: BLE001 — best-effort
+                    logger.exception("issue creation failed for finding %s", f.id)
+                    continue
+                row = await db.get(Finding, f.id)
+                if row is not None:
+                    row.github_issue_url = issue.get("html_url")
+            await db.commit()
+
+
+def _render_issue(finding: Finding, template: str) -> tuple[str, str]:
+    """Render a GitHub issue (title, body) from a finding. Mirrors the manual
+    per-finding renderer in the GitHub API router."""
+    fields = {
+        "public_id": finding.public_id, "severity": (finding.severity or "").upper(),
+        "category": finding.category or "", "file": finding.file,
+        "line_start": finding.line_start, "line_end": finding.line_end,
+        "cwe_id": finding.cwe_id or "—", "owasp_ref": finding.owasp_ref or "—",
+        "explanation": finding.explanation or "", "fix_summary": finding.fix_summary or "",
+    }
+    title = f"[{fields['severity']}] {finding.public_id}: {finding.category or 'Finding'}"
+    try:
+        body = template.format(**fields)
+    except (KeyError, IndexError):
+        body = f"{finding.public_id}: {finding.explanation or ''}"
+    return title, body
 
 
 async def materialize_source_safe(scan_id: str) -> tuple[str, str | None]:
@@ -569,9 +766,11 @@ async def _finalize(
                 "scan %s finished with %d unparseable segment(s) — findings lost",
                 scan_id, unparsed,
             )
-        scan.security_score = scoring.security_score(sec)
-        scan.optimization_score = scoring.optimization_score(opt_scores, opt)
-        scan.completeness_score = scoring.completeness_score(stubs)
+        # Scores are normalized by codebase size (analyzed segments).
+        seg_n = scan.segment_total or 0
+        scan.security_score = scoring.security_score(sec, seg_n)
+        scan.optimization_score = scoring.optimization_score(opt_scores, opt, seg_n)
+        scan.completeness_score = scoring.completeness_score(stubs, seg_n)
         scan.worst_severity = scoring.worst_severity(sec) or "clean"
         scan.status = SCAN_COMPLETED
         scan.completed_at = utcnow()

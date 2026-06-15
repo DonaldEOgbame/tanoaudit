@@ -31,16 +31,14 @@ split the work across multiple AI agents **without collisions**.
 ### Local run
 
 ```bash
-# backend
+# backend — runs scans, the WebSocket, and the maintenance loop (no separate worker)
 cd backend && .venv/bin/python -m uvicorn app.main:app --port 8000
-# (optional, for cross-process live scan events) arq worker:
-cd backend && .venv/bin/arq app.worker.WorkerSettings
 # frontend
 cd frontend && python3 -m http.server 8765   # open http://localhost:8765
 ```
 
-CORS already allows `:8765`. A reachable Redis is needed for live scan events when a
-separate worker runs (see backend `KNOWN_LIMITATIONS.md`).
+CORS already allows `:8765`. No Redis is required: scans run in-process and live
+events stream from the API process (see backend `KNOWN_LIMITATIONS.md`).
 
 ---
 
@@ -244,7 +242,7 @@ Yes, parallel agents are fine. To avoid stepping on each other:
 
 ## Backend notes (mostly leave alone)
 
-The backend is complete and tested. Two robustness fixes already landed during scan
-wiring (Redis connect-timeout + rate-limit fail-open). If a slice needs a missing
-endpoint (the Gaps above), treat that as a separate backend task with its own tests —
-don't bolt client-only workarounds onto demo data.
+The backend is complete and tested, and runs with no Redis/broker (in-memory event
+bus, in-process + polling-worker scan execution, in-memory rate limiting). If a slice
+needs a missing endpoint (the Gaps above), treat that as a separate backend task with
+its own tests — don't bolt client-only workarounds onto demo data.

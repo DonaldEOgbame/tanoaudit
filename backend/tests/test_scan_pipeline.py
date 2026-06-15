@@ -172,10 +172,50 @@ async def test_full_scan_pipeline(auth, tmp_path):
     assert f0["cwe_id"] == "CWE-89"
 
 
+async def test_scan_profile_caps_segments_analyzed(auth, tmp_path, monkeypatch):
+    """The profile (stored as `depth`) bounds how many segments are analyzed.
+
+    With a repo of N functions and a cap of 1, only 1 segment is analyzed and
+    segment_total reflects the cap, not the full repo.
+    """
+    from app.services import orchestrator
+
+    src = tmp_path / "repo"
+    src.mkdir()
+    # Several small functions → several segments, comfortably above the cap.
+    (src / "many.py").write_text(
+        "\n\n".join(f"def f{i}(a, b):\n    return a + b + {i}" for i in range(6)) + "\n"
+    )
+
+    # Force a tiny cap for the "fast" profile so the test stays small.
+    monkeypatch.setitem(orchestrator._DEPTH_LIMITS, "fast", 1)
+
+    client, headers, _ = auth
+    user_id = await _current_user_id(client, headers)
+    async with SessionLocal() as db:
+        scan = Scan(
+            user_id=user_id,
+            source_type="zip", repo="user/fixture", depth="fast",
+            include_optimization=True, models=["gemini"],
+        )
+        db.add(scan)
+        await db.commit()
+        scan_id = scan.id
+
+    await run_scan(scan_id, complete=fake_complete, workdir=str(src), cleanup=False)
+
+    r = await client.get(f"{PREFIX}/scans/{scan_id}", headers=headers)
+    scan = r.json()["data"]
+    assert scan["status"] == SCAN_COMPLETED
+    # Capped: only 1 segment analyzed even though the file has 6 functions.
+    assert scan["segment_total"] == 1
+    assert scan["segments_analyzed"] == 1
+
+
 async def test_zip_extracts_to_shared_dir_and_materializes(auth):
     """A ZIP scan extracts into the shared scan-id dir, and materialize_source
-    resolves to that same dir from the id alone — the path an arq worker reads,
-    with no workdir argument that wouldn't survive a process hop."""
+    resolves to that same dir from the id alone — the path a separate polling
+    worker reads, with no workdir argument that wouldn't survive a process hop."""
     import io
     import os
     import zipfile
@@ -214,7 +254,7 @@ async def test_zip_extracts_to_shared_dir_and_materializes(auth):
 
 async def test_zip_upload_endpoint_completes(auth):
     """The real /scans/upload endpoint runs a ZIP scan to completion via the
-    in-process fallback (no Redis in tests)."""
+    in-process BackgroundTask."""
     import io
     import zipfile
 
@@ -431,6 +471,39 @@ async def test_analyze_batch_recovers_truncated_segments():
     assert calls["n"] >= 2                        # the recovery actually ran
 
 
+async def test_default_complete_satisfies_batch_contract():
+    """The placeholder provider must answer a batch prompt in the indexed
+    {"results": {"0": ...}} shape, not a single flat object. A flat object parses
+    to all-None, which would force analyze_batch to split the whole batch down to
+    single segments one call at a time. Regression: keyless scans degraded to
+    1-call-per-segment and logged "segment dropped" for every segment first."""
+    from app.services.analysis import analyze_batch, build_batch_prompt, parse_batch
+    from app.services.orchestrator import default_complete
+    from app.services.segmentation import SegmentData
+
+    segs = [SegmentData(f"f{i}.py", "python", 1, 3, f"x = {i}", f"h{i}") for i in range(4)]
+
+    # Direct parse: the batch response is fully index-aligned, zero None.
+    raw = await default_complete(build_batch_prompt(segs, True, None, None), None)
+    assert all(r is not None for r in parse_batch(raw, 4))
+
+    # End-to-end: exactly one provider call (no split-to-singles recovery).
+    calls = {"n": 0}
+
+    async def counting(prompt, model_hint):
+        calls["n"] += 1
+        return await default_complete(prompt, model_hint)
+
+    out = await analyze_batch(segs, counting)
+    assert len(out) == 4 and all(r is not None for r in out)
+    assert calls["n"] == 1, f"expected 1 batch call, got {calls['n']} (split-to-singles)"
+
+    # The single-segment contract is unchanged: a non-batch prompt gets the flat
+    # object (single path reuses analyze_segment, which expects that shape).
+    single = await default_complete("analyze one segment", None)
+    assert '"results"' not in single
+
+
 async def test_concurrent_batches_complete_and_order_findings(auth, tmp_path):
     """With concurrency>1, batches run in parallel but results must still be
     correct: every segment analyzed, findings attributed to the right file,
@@ -535,16 +608,6 @@ async def test_worker_claims_each_scan_once(auth):
             assert s.worker_id is not None
     # A second claim pass finds nothing left queued.
     assert await _claim_queued_scans() == []
-
-
-# ---- Dispatch fallback ------------------------------------------------------
-async def test_dispatch_falls_back_without_redis():
-    """With no REDIS_URL (test env), enqueue returns False so callers run work
-    in-process. This is what keeps scans running on a Redis-less box."""
-    from app.services.dispatch import enqueue, reset_pool
-
-    await reset_pool()
-    assert await enqueue("run_scan_task", scan_id="nope") is False
 
 
 # ---- Worker: orphan recovery ------------------------------------------------

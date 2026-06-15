@@ -55,19 +55,16 @@ on your hardware.
 
 ---
 
-## Option B — full stack (API + worker)
+## Option B — full stack (API serves scans + WebSocket)
 
-The production shape: the API enqueues scans, a worker runs them, live progress
-streams over WebSocket.
+The production shape: the API runs scans in-process and streams live progress
+over the WebSocket. There is no separate worker — a maintenance loop (scheduled
+watchlist re-scans, orphan recovery, digests, file-cache sweep) starts inside the
+API automatically. Run a single API replica.
 
 ```bash
-# Terminal 1 — the API
+# Just the API — runs scans, the WebSocket, and the maintenance loop.
 uvicorn app.main:app --port 8000
-
-# Terminal 2 — the worker (needs Redis reachable via REDIS_URL)
-arq app.worker.WorkerSettings
-# …or, with no Redis, the polling fallback worker:
-#   python -m app.worker
 ```
 
 Then create a scan over HTTP (log in first to get a token):

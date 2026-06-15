@@ -12,21 +12,36 @@ environmental (needs an account/key) or a deliberate, low-risk choice.
 
 ## Remaining — environmental (need a key/account/runtime)
 
-- 🟢 **Provider keys, GitHub OAuth, search, email are all opt-in.** The app runs
-  fully without them (deterministic fallbacks). To enable the real thing, set:
-  - `GEMINI`/`OPENROUTER` keys (per-user, via Settings) — real scans/chat/fixes.
+- 🟢 **LLM keys are server-side; GitHub OAuth, search, email are opt-in.** Users
+  never provide API keys — set these on the server:
+  - `GEMINI_API_KEY` / `OPENROUTER_API_KEY` — the keys behind every user's
+    scans/chat. Unset -> that provider is unavailable and scans fall back to the
+    empty-result placeholder (a deploy misconfig, not a user state).
   - `GITHUB_CLIENT_ID`/`SECRET` — OAuth; without them `/github/authorize` 503s.
   - `TAVILY_KEY` (or `SERPAPI_KEY`) — live custom-vuln web research.
   - `MAILERSEND_API_KEY` or `SMTP_*` — real email; else logged to an outbox.
-  - `REDIS_URL` reachable — cross-process event bus, shared rate limiting, and the
-    arq task queue (scans/exports + cron jobs); else in-memory bus + the in-process
-    poller/BackgroundTasks fallback.
   - `MCP_API_KEY` — require bearer auth on `/mcp`.
+- 🟢 **Server-side model tiers + daily scan cap (no BYO keys).** Users pick
+  Akira-branded tiers — **Akira Fast** (Gemini Flash), **Akira Balanced**
+  (Claude Haiku), **Akira Deep** (Claude Sonnet) — exposed via `GET /scans/models`
+  as `{id,label,description}` only; the provider/model behind each tier is never
+  sent to the client, and finding attribution / usage stats use the tier label,
+  never the vendor (`services/model_catalog.py`, `ModelRouter.label_for`). Tier
+  backends are env-overridable (`TIER_FAST_MODEL` etc.). A hard rolling-24h scan
+  cap per user (`DAILY_SCAN_LIMIT`, default 5) returns **429
+  `daily_limit_reached`** with `resets_in_seconds`; `GET /scans/limit` reports
+  usage. The old per-user `api_keys` BYO surface (Settings UI + `/settings/api-keys`
+  endpoints) is removed; the `api_keys` table is left in place (dormant) and
+  `services/providers.py` is orphaned — drop both in a follow-up migration/cleanup.
+- 🟢 **No Redis / external broker, single process by design.** The event bus is
+  in-memory and rate limiting uses an in-memory window. Every scan runs inside the
+  API process — user scans as BackgroundTasks, headless scans (scheduled/orphan)
+  via the in-process maintenance loop — so live events always reach the WebSocket.
+  No arq/Celery, no Redis, no separate worker process. Run a single API replica
+  (the maintenance loop's claim path is not built for multi-process contention).
 - 🟢 **`requirements.txt` pins exact versions** (`==`) to the resolved,
   full-suite-passing set under Python 3.14; the 3.12 Docker image installs the
-  same versions. **redis is pinned to 5.x** because arq 0.28 requires redis<6
-  (the `redis.asyncio` pub/sub + pipeline API the event bus uses is unchanged
-  5.x↔8.x). *Bump deliberately, re-run the suite, repin.*
+  same versions. *Bump deliberately, re-run the suite, repin.*
 - 🟢 **Session location is null.** No GeoIP enrichment; needs a GeoIP DB.
 
 ## Frontend ↔ backend wiring (in progress)
@@ -54,26 +69,17 @@ to the live API is underway, **foundation-first**:
   (the Tweaks "Run a demo scan" showcase) it falls back to the timed simulation.
   Verified end-to-end through the real frontend (headless Chrome): login → ZIP upload →
   live WS event stream → completion, zero exceptions.
-- 🟢 **Two backend robustness fixes surfaced during scan wiring** (both fail-open):
-  - Event-bus Redis `socket_connect_timeout` was hardcoded `0.5s` — too tight for a
-    TLS handshake to managed Redis (Upstash `rediss://` measured ~1.5s), so the bus
-    silently fell back to in-memory and live scan events never crossed from the worker
-    process to the API's WebSocket (arq still worked, masking it). Now configurable via
-    `REDIS_CONNECT_TIMEOUT` (default `5.0`), with an INFO/WARNING log of the chosen
-    backend. `scan_events._get_redis`.
-  - Rate limiter (`core/ratelimit.py`) now catches Redis op failures and falls back to
-    the in-memory window instead of letting a transient Redis timeout bubble up as a
-    500 on the protected endpoint (e.g. login).
 - 🟡 **Report page still demo-data.** The live scan transitions into `ScanReport`, which
   still renders `window.VS_*` findings; `scanId`/`repo` are now passed in but not yet
   consumed. Remaining demo-data screens: report/findings tabs, dashboard stats/charts,
   scans list, watchlist, plans, custom vulns, library, chat, settings persistence.
-- 🟢 **Live cross-process events require Redis** (unchanged by design): the worker and
-  API are separate processes, so they only share the event stream through Redis. With
-  no reachable Redis *and* no separate worker, scans run in-process (BackgroundTasks)
-  and the same-process in-memory bus still feeds the WS. A separate worker + no Redis is
-  the one combo where the WS sees nothing live (replay is also empty) — acceptable, and
-  now far less likely to trip silently thanks to the timeout fix above.
+- 🟢 **Live events always stream** (by design): every scan runs inside the API
+  process (user scans as BackgroundTasks, headless scans via the in-process
+  maintenance loop), and the in-memory event bus feeds the WebSocket in that same
+  process. The only time the WS shows no *live* events is a reconnect to an
+  already-finished scan, which gets the DB-derived terminal event
+  (`api/scan_ws._terminal_event`). There is no process boundary a scan can run
+  behind, so there is no "scan ran somewhere the WS couldn't see it" case.
 
 ## Post-launch feature additions (this session)
 
@@ -102,11 +108,15 @@ to the live API is underway, **foundation-first**:
   `security` + `optimizations` + `stubs` in one JSON response; no extra calls. The
   `stubs` key and `segment_scores.completeness_score` default to empty/100 so
   old-shape responses still parse.
-- 🟢 **`completeness_score` is recomputed from stored stub findings at finalize**
-  (severity-weighted, `scoring.completeness_score`), not averaged from the
-  per-segment scores the model returns. This keeps it consistent with how
-  `security_score` works and lets intentional stubs be excluded cleanly. The
-  per-segment `completeness_score` the model emits is currently parsed but unused.
+- 🟢 **All scores are RELATIVE TO CODEBASE SIZE.** `security_score`,
+  `completeness_score`, and the optimization fallback normalize their
+  severity-weighted penalty against the number of analyzed segments
+  (`scoring._relative_score`, budget = max(segments, 8) × 4 penalty-pts). Before,
+  they were flat penalty sums, so a few minor findings in a large repo scored the
+  same as a tiny all-broken repo (FundingRateBot completeness was a misleading 19;
+  size-relative it's 73). `completeness_score` is recomputed from stored stub
+  findings at finalize (lets intentional stubs be excluded); the per-segment
+  `completeness_score` the model emits is parsed but unused.
 - 🟢 **Stubs are excluded from cross-model verification** by design (spec): a stub
   is either present or not, so there's no ambiguity worth a second opinion — saves
   tokens. Enforced by the `engine == security` filter on the verification query.
@@ -218,26 +228,35 @@ to the live API is underway, **foundation-first**:
 
 ## Remaining — deliberate / low-risk
 
-- 🟢 **Worker now runs on arq (Redis task queue), with the poller as fallback.**
-  Primary dispatch is arq: `app/services/dispatch.enqueue` enqueues `run_scan_task`
-  / `export_report_task` when `ARQ_ENABLED` and Redis is reachable; the
-  `WorkerSettings` worker (`arq app.worker.WorkerSettings`) gives retries
-  (`max_tries=3`), backpressure (`max_jobs=5`), timeouts, and cron jobs
-  (watchlist re-scans, orphan recovery, weekly digest, file-cache sweep). When
-  Redis is down / `ARQ_ENABLED=false`, `enqueue` returns False and work runs
-  in-process (FastAPI BackgroundTasks for scans, the polling worker for
-  watchlist/digest) — so a Redis-less box still scans. The atomic-claim path
-  (`queued`→`claimed`, `SELECT ... FOR UPDATE SKIP LOCKED` / guarded UPDATE)
-  remains as the poller's no-double-run guarantee. **ZIP-upload scans now also go
-  to arq**: the upload endpoint extracts into a shared, scan-id-keyed dir
-  (`ingestion.scan_upload_dir`, under the storage root, mountable across
-  workers), and `materialize_source` resolves a ZIP scan to that dir from the id
-  alone — so all scan types flow through the same `run_scan_task(scan_id)` enqueue.
-  *Pinned to redis 5.x (arq 0.28 requires redis<6).*
+- 🟢 **In-process scan execution + maintenance loop (no broker, no worker).** A
+  user scan is committed as `queued` and run immediately in a FastAPI
+  BackgroundTask. A DB-backed maintenance loop runs inside the API process
+  (`app.worker.run_maintenance_loop`, started in `app.main.lifespan`) and claims
+  any `queued`/orphaned scan — scheduled watchlist re-scans and crash-orphans that
+  have no attached client — running them via the same `run_scan` orchestrator, in
+  the same process, so their progress still streams. `run_scan` does a guarded
+  `queued|claimed -> running` UPDATE, so the BackgroundTask and the loop can never
+  double-run the same scan (rowcount 0 -> the other side won; bail). **ZIP-upload
+  scans** extract into a scan-id-keyed dir (`ingestion.scan_upload_dir`) that
+  `materialize_source` resolves from the id alone, so all scan types share the
+  `run_scan(scan_id)` path. Single API replica (the claim path isn't built for
+  multi-process contention).
 - ✅ **Orphan-scan recovery.** A scan stuck in `claimed`/`running` past 15 min
-  (worker crash) is re-queued under a retry cap (`scans.retry_count`, max 3),
-  then marked failed. Runs as an arq cron and in the poller loop. Migration
-  `f5b2d9e7a3c1`.
+  (e.g. an API restart mid-scan) is re-queued under a retry cap
+  (`scans.retry_count`, max 3), then marked failed. Runs in the maintenance loop.
+  Migration `f5b2d9e7a3c1`.
+- ✅ **Batch-recovery / placeholder-provider parse bug (fixed).** Two issues made
+  a *completely* failed batch needlessly expensive. (1) `analyze_batch` only ran
+  recovery `if missing and len(missing) < len(segments)`, so a batch where *every*
+  segment failed to parse was dropped instead of retried — now `if missing:`.
+  (2) `default_complete` (the keyless-scan placeholder) returned a single flat
+  result object, but `build_batch_prompt` expects the indexed
+  `{"results": {"0": {...}, ...}}` shape; the flat object parsed to all-None,
+  forcing `_analyze_subset` to split the whole batch down to single segments one
+  call at a time and log "segment dropped" for each. `default_complete` now
+  detects batch prompts (via the `### SEGMENT i` headers) and emits the indexed
+  shape, so a keyless batch resolves in one call. Regression test:
+  `test_default_complete_satisfies_batch_contract`.
 - 🟢 **MCP transport is a minimal direct implementation** (initialize/tools.list/
   tools.call/ping over POST; SSE GET is keep-alive). Bearer auth is supported.
   It now advertises current protocol versions (`2025-06-18`/`2025-03-26`/
@@ -247,8 +266,8 @@ to the live API is underway, **foundation-first**:
   server-initiated messages), so there's nothing to resume. *Add session
   management only if a streaming feature (e.g. server-pushed scan progress over
   MCP) is added.*
-- 🟢 **Exports render in the arq worker** (`export_report_task`), with an
-  in-process BackgroundTask fallback when arq is unavailable. `create_export`
+- 🟢 **Exports render in an in-process BackgroundTask** (`_render_export_bg`).
+  `create_export`
   returns the `pending` report immediately; the client polls
   `list_exports`/`download_export` until `ready`. `_render_export` is the single
   shared renderer for both paths.
@@ -265,7 +284,25 @@ to the live API is underway, **foundation-first**:
 - 🟢 **Learning Hub content is templated** (category/class-aware), not hand-authored
   per class; some resource links are searches (YouTube/articles).
 - 🟢 **Chat thumbs up/down are visual only** (no feedback storage).
-- 🟢 **Usage "current session" = rolling 24h** (no real session concept).
+- 🟢 **Usage page shows the real daily-scan cap + per-tier daily token limits**
+  (from `/usage`: `daily_scans` and `daily_tokens_by_model[].limit`). The old
+  invented "current session token quota" card was removed — there's no real
+  session-token concept; all numbers are now backend-sourced.
+- 🟢 **Scan profile now caps coverage for real.** The New Scan modal offers one
+  "Scan profile" (Fast/Balanced/Thorough) that sets both the engine (Akira tier)
+  and the segment cap. `orchestrator._DEPTH_LIMITS` (120/400/800) is now applied
+  to truncate segments per profile (it was previously dead code — every scan
+  analyzed all segments). Surplus segments are logged, not analyzed.
+- 🟢 **No "% AI-generated" composition number — by design.** Reliable AI-vs-human
+  code detection isn't currently possible (research detectors ~84% in a lab, worse
+  on clean/polished AI code), so the AI-Gen tab shows only concrete, defensible
+  signals: counts of patterns commonly left by code-generation tools (stubs,
+  copy-paste validation, hardcoded values, etc.) + a real finding-density risk
+  `delta`. The old findings-ratio percentage overstated it (FundingRateBot showed
+  33%); a code-based line scanner was prototyped and removed because even that only
+  catches lazy tells and read ~0% on known-AI code — a false negative. `/scans/{id}/
+  ai-generation` returns `patterns`, `signal_count`, `delta` (deprecated `percent`
+  kept for back-compat, not shown).
 - 🟢 **Live provider/GitHub calls are mocked in tests** (no network in CI).
 - 🟢 **Frontend is mock-driven** except the redesigned Chat + Learning Hub.
   Wiring it to the API is the next phase; the backend returns the shapes it needs.
@@ -278,10 +315,9 @@ to the live API is underway, **foundation-first**:
 - ✅ **🔴 Valid secrets.** `.env.example` ships working sample `JWT_SECRET`/
   `FERNET_KEY`; `python -m scripts.generate_secrets` mints real ones; the app
   **refuses to boot in production** with the samples (`assert_production_safe`).
-- ✅ **🔴 Redis-backed event bus.** `scan_events` now uses Redis pub/sub +
-  history + control keys when `REDIS_URL` is reachable (cross-process
-  pause/cancel/stream), with an identical in-memory fallback. Control methods are
-  async.
+- ✅ **In-memory event bus.** `scan_events` fans scan progress out to WebSocket
+  subscribers via asyncio queues, with in-memory history (replay) and
+  pause/cancel control flags. Single-process; control methods are async.
 - ✅ **🔴 Tree-sitter segmentation.** `tree-sitter` + `tree-sitter-language-pack`
   installed; `tree_sitter_support.segment_with_tree_sitter` cuts on function/
   class boundaries (binding-agnostic), with sliding-window fallback. **Now
@@ -306,7 +342,7 @@ to the live API is underway, **foundation-first**:
   worker fires due re-scans system-wide and digests ~daily.
 - ✅ **Full-fix context.** The fix endpoint re-fetches the file from GitHub
   (`get_file_content`) and passes a surrounding-lines window to the model.
-- ✅ **Global rate limiting.** `core/ratelimit.rate_limit` (Redis or in-memory)
+- ✅ **Global rate limiting.** `core/ratelimit.rate_limit` (in-memory fixed window)
   on login/register/scan-create/handoff-generate; toggle via `RATE_LIMIT_ENABLED`.
 - ✅ **Structured logging + correlation IDs.** JSON logs with a per-request
   `X-Request-ID` (`core/logging`), echoed in the response header.
@@ -315,4 +351,14 @@ to the live API is underway, **foundation-first**:
 - ✅ **WeasyPrint in Docker** (cairo/pango installed) → real PDF exports in the
   container; HTML fallback remains for local/no-deps.
 - ✅ **GitHub authenticated clone** (private repos) — done in Module 11.
+  Hardened: blank/whitespace branch treated as default; a nonexistent remote
+  branch retries once on the default branch instead of failing the scan;
+  `GIT_TERMINAL_PROMPT=0`/`GIT_ASKPASS=true` prevent interactive hangs; embedded
+  `x-access-token` credentials are redacted from clone errors/logs.
+- ✅ **GitHub outcomes wired to scan completion.** `_emit_github_outcomes`
+  posts a commit status (when `status_check.post_commit_status` + a known SHA)
+  and auto-creates issues for findings at/above `issue_settings.severity_threshold`
+  (when `auto_create`), both best-effort. Webhooks auto-register on repos as they
+  are added to `repo_access: selected`. OAuth uses `prompt=select_account` so a
+  user can connect a different account after disconnecting.
 - ✅ **Alembic migrations** cover every table + the new columns.

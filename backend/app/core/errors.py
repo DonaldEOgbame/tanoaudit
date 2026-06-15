@@ -14,12 +14,21 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 class APIError(Exception):
-    """Raised anywhere in the app to produce a clean enveloped error response."""
+    """Raised anywhere in the app to produce a clean enveloped error response.
 
-    def __init__(self, code: str, message: str, status_code: int = 400):
+    `details` is an optional structured payload merged into the error object (e.g.
+    `{"resets_in_seconds": 3600}` for a rate/usage limit) so the client can render
+    a precise message without parsing prose.
+    """
+
+    def __init__(
+        self, code: str, message: str, status_code: int = 400,
+        details: dict | None = None,
+    ):
         self.code = code
         self.message = message
         self.status_code = status_code
+        self.details = details
         super().__init__(message)
 
 
@@ -27,8 +36,11 @@ def envelope(data: Any) -> dict:
     return {"data": data, "error": None}
 
 
-def error_body(code: str, message: str) -> dict:
-    return {"data": None, "error": {"code": code, "message": message}}
+def error_body(code: str, message: str, details: dict | None = None) -> dict:
+    err = {"code": code, "message": message}
+    if details:
+        err.update(details)
+    return {"data": None, "error": err}
 
 
 # Common shortcuts ------------------------------------------------------------
@@ -56,7 +68,8 @@ def register_exception_handlers(app) -> None:
     @app.exception_handler(APIError)
     async def _api_error(_: Request, exc: APIError):
         return JSONResponse(
-            status_code=exc.status_code, content=error_body(exc.code, exc.message)
+            status_code=exc.status_code,
+            content=error_body(exc.code, exc.message, exc.details),
         )
 
     @app.exception_handler(StarletteHTTPException)

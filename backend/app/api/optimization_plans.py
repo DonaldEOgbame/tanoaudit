@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.database import get_db
-from app.core.errors import bad_request, envelope, not_found
+from app.core.errors import APIError, bad_request, envelope, not_found
 from app.models.optimization_plan import OptimizationGoal, OptimizationPlan
 from app.models.repository import Repository
 from app.models.scan import Finding
@@ -25,7 +25,7 @@ from app.schemas.optimization_plan import (
     ValidateRequest,
 )
 from app.services.goal_tracking import plan_health, plan_progress
-from app.services.plan_validation import validate_plan
+from app.services.plan_validation import validate_goals, validate_plan
 from app.services.router_factory import build_router_for_user
 
 router = APIRouter(prefix="/optimization-plans", tags=["optimization-plans"])
@@ -82,6 +82,35 @@ async def create_plan(
     repo = await db.get(Repository, body.repository_id)
     if repo is None or repo.user_id != user.id:
         raise bad_request("repository_id does not reference one of your repositories")
+
+    # Server-side validation gate: goals MUST pass AI validation before a plan is
+    # saved. This holds for every path (UI, direct API, MCP) — not just the UI
+    # button. Rejected with 422 + the per-goal issues so callers can fix them.
+    goals_text = [g.text for g in body.goals if (g.text or "").strip()]
+    if not goals_text:
+        raise bad_request("A plan needs at least one goal")
+    context = "No prior scan context."
+    if repo.last_scan_id:
+        from app.models.scan import Scan
+        scan = await db.get(Scan, repo.last_scan_id)
+        if scan and scan.executive_summary:
+            context = scan.executive_summary
+    router_obj = await build_router_for_user(user.id)
+    verdict = await validate_goals(goals_text, context, router_obj)
+    if verdict.get("status") == "issues":
+        raise APIError(
+            "plan_validation_failed",
+            "Some goals need attention before this plan can be saved.",
+            422,
+            details={"issues": verdict.get("issues", [])},
+        )
+    if verdict.get("status") != "approved":
+        raise APIError(
+            "plan_validation_unavailable",
+            verdict.get("error", "Plan validation could not be completed. Try again."),
+            422,
+        )
+
     plan = OptimizationPlan(
         user_id=user.id, repository_id=body.repository_id,
         name=body.name, priority=body.priority,

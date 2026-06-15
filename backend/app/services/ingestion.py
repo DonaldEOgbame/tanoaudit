@@ -8,12 +8,21 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.errors import bad_request
+
+# Redact embedded credentials (https://x-access-token:<token>@github.com/…)
+# before any clone URL or git stderr is surfaced to a user or a log.
+_CRED_IN_URL = re.compile(r"(https://)([^/@\s]+)@")
+
+
+def _redact(text: str) -> str:
+    return _CRED_IN_URL.sub(r"\1***@", text or "")
 
 # Limits
 MAX_ZIP_BYTES = 100 * 1024 * 1024  # 100 MB compressed
@@ -118,20 +127,21 @@ def extract_zip(data: bytes, dest: str) -> None:
 CLONE_TIMEOUT_S = 120
 
 
-async def clone_repo(url: str, dest: str, branch: str | None = None) -> None:
-    """Shallow-clone a git URL into `dest`, with a hard timeout.
-
-    Without the timeout a network stall (unreachable host, hung transfer) would
-    block the scan — and the worker — forever.
-    """
-    args = ["git", "clone", "--depth", "1"]
+async def _run_clone(url: str, dest: str, branch: str | None) -> tuple[int, str]:
+    """Run a single `git clone` attempt. Returns (returncode, redacted_stderr)."""
+    # `dest` is a fresh mkdtemp dir; git needs it empty, so clone into a
+    # subdirectory and let git create it.
+    args = ["git", "clone", "--depth", "1", "--no-tags", "--single-branch"]
     if branch:
         args += ["--branch", branch]
-    args += [url, dest]
+    args += ["--", url, dest]
     proc = await asyncio.create_subprocess_exec(
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        # Never prompt for credentials on a private/404 repo — fail fast instead
+        # of hanging the worker on an interactive username/password prompt.
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "true"},
     )
     try:
         _, stderr = await asyncio.wait_for(proc.communicate(), timeout=CLONE_TIMEOUT_S)
@@ -139,8 +149,55 @@ async def clone_repo(url: str, dest: str, branch: str | None = None) -> None:
         proc.kill()
         await proc.wait()
         raise bad_request(f"Repository clone timed out after {CLONE_TIMEOUT_S}s")
-    if proc.returncode != 0:
-        raise bad_request(f"Could not clone repository: {stderr.decode()[:200]}")
+    return proc.returncode, _redact(stderr.decode(errors="replace"))
+
+
+async def clone_repo(url: str, dest: str, branch: str | None = None) -> None:
+    """Shallow-clone a git URL into `dest`, with a hard timeout.
+
+    Resilience:
+      * A blank/whitespace branch is treated as "no branch" (clone the default).
+      * If a branch-specific clone fails because the branch doesn't exist on the
+        remote, retry once on the repo's default branch rather than failing the
+        whole scan. (Webhooks and the UI can supply a branch that isn't present.)
+      * Credentials embedded in the URL are scrubbed from any surfaced error.
+
+    Without the timeout a network stall (unreachable host, hung transfer) would
+    block the scan — and the worker — forever.
+    """
+    branch = (branch or "").strip() or None
+
+    code, stderr = await _run_clone(url, dest, branch)
+    if code == 0:
+        return
+
+    # A missing branch is recoverable: retry on the default branch. git reports
+    # this as "Remote branch <x> not found" / "Could not find remote branch".
+    branch_missing = branch and re.search(
+        r"remote branch .* not found|could not find remote branch", stderr, re.I
+    )
+    if branch_missing:
+        # `dest` may now hold a partial checkout; clear it before retrying.
+        _empty_dir(dest)
+        code, stderr = await _run_clone(url, dest, None)
+        if code == 0:
+            return
+
+    raise bad_request(f"Could not clone repository: {stderr[:200]}")
+
+
+def _empty_dir(path: str) -> None:
+    """Remove all contents of `path` (kept), best-effort."""
+    import shutil
+
+    for entry in os.scandir(path):
+        try:
+            if entry.is_dir(follow_symlinks=False):
+                shutil.rmtree(entry.path, ignore_errors=True)
+            else:
+                os.unlink(entry.path)
+        except OSError:
+            pass
 
 
 async def git_head_commit(path: str) -> str | None:
@@ -190,10 +247,10 @@ def scan_upload_dir(scan_id: str) -> str:
     """Deterministic, scan-id-keyed dir for uploaded ZIP sources.
 
     Lives under a shared storage root (sibling of the export dir) rather than a
-    process-local temp dir, so an arq worker in a separate process/host can read
+    process-local temp dir, so a separate polling worker process/host can read
     the extracted files. The path is reconstructable from the scan id alone, so
-    ZIP scans flow through the same `run_scan_task(scan_id)` enqueue as
-    github/url scans — no workdir argument that wouldn't survive a process hop.
+    ZIP scans flow through the same `run_scan(scan_id)` path as github/url scans —
+    no workdir argument that wouldn't survive a process hop.
     """
     from app.core.config import settings
 

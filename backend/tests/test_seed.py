@@ -44,11 +44,10 @@ async def test_seed_produces_complete_demo(client):
     assert crit_stub["risk_if_shipped"]
     assert demo["completeness_score"] == 52
 
-    # API keys are present and masked (never leak the raw value).
-    r = await client.get(f"{PREFIX}/settings/api-keys", headers=headers)
-    keys = r.json()["data"]
-    assert {k["provider"] for k in keys} == {"gemini", "openrouter"}
-    assert all("redacted" not in k["masked"] for k in keys)
+    # No per-user API keys: the server holds provider keys. The demo user has a
+    # default Akira tier preference instead.
+    r = await client.get(f"{PREFIX}/settings/models", headers=headers)
+    assert r.json()["data"]["default_tier"] == "akira_balanced"
 
     # Optimization plan + watched repo.
     r = await client.get(f"{PREFIX}/watchlist", headers=headers)
@@ -74,3 +73,33 @@ async def test_seed_is_idempotent(client):
     headers = {"Authorization": f"Bearer {r.json()['data']['tokens']['access_token']}"}
     r = await client.get(f"{PREFIX}/scans", headers=headers)
     assert len(r.json()["data"]["items"]) == 1  # not duplicated
+
+
+async def test_seed_repairs_corrupt_password_hash(client):
+    """A stale/corrupt password hash on an existing demo user must be repaired by
+    re-seeding, so the demo account can never get locked out."""
+    from sqlalchemy import select
+    from app.core.database import SessionLocal
+    from app.models.user import User
+
+    await run_seed()
+
+    # Corrupt the stored hash, simulating an old/incompatible bcrypt artifact.
+    async with SessionLocal() as db:
+        user = (await db.execute(select(User).where(User.email == DEMO_EMAIL))).scalar_one()
+        user.password_hash = "$2b$12$" + "x" * 53
+        db.add(user)
+        await db.commit()
+
+    # Login is broken with the corrupt hash.
+    r = await client.post(
+        f"{PREFIX}/auth/login", json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD},
+    )
+    assert r.status_code == 401
+
+    # Re-seeding repairs it.
+    await run_seed()
+    r = await client.post(
+        f"{PREFIX}/auth/login", json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD},
+    )
+    assert r.status_code == 200

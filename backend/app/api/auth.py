@@ -152,6 +152,135 @@ async def login(
     )
 
 
+# ---- Sign in with GitHub -----------------------------------------------------
+# Distinct from the account-linking OAuth in app/api/github.py: this flow
+# authenticates a user *from* their GitHub identity (find-or-create by verified
+# email), then issues the same session + token pair as a password login.
+import secrets as _secrets
+
+
+@router.get("/github/start")
+async def github_login_start():
+    """Return the GitHub authorize URL for 'Sign in with GitHub'."""
+    from app.services import github_client as gh
+
+    if not (settings.github_client_id and settings.github_client_secret):
+        from app.core.errors import APIError
+
+        raise APIError(
+            "github_not_configured",
+            "GitHub sign-in is not configured on this server.",
+            503,
+        )
+    # Sign a short-lived, identity-free state token for CSRF protection.
+    state = create_access_token(
+        "github_login", purpose="github_login", nonce=_secrets.token_urlsafe(8)
+    )
+    return envelope({"authorize_url": gh.login_authorize_url(state), "state": state})
+
+
+async def _find_or_create_github_user(
+    db: AsyncSession, email: str, profile: dict
+) -> User:
+    """Resolve a User by verified GitHub email, creating one if none exists.
+
+    GitHub-created accounts get an unusable random password hash; they sign in
+    via GitHub. They can set a password later through the normal reset flow.
+    """
+    email = email.lower()
+    user = (
+        await db.execute(select(User).where(User.email == email))
+    ).scalar_one_or_none()
+    if user is not None:
+        # Backfill profile bits we didn't have before (best-effort).
+        if not user.avatar_url and profile.get("avatar_url"):
+            user.avatar_url = profile["avatar_url"]
+        if not user.full_name and profile.get("name"):
+            user.full_name = profile["name"]
+        return user
+
+    user = User(
+        email=email,
+        email_verified=True,  # GitHub vouches for the verified email.
+        password_hash=hash_password(_secrets.token_urlsafe(32)),
+        full_name=profile.get("name"),
+        avatar_url=profile.get("avatar_url"),
+        settings={"theme": "system", "default_scan_mode": "Deep"},
+        privacy={"improve_ai": True, "store_scan_history": True},
+        notifications={
+            "scan_complete": True,
+            "critical_found": True,
+            "watchlist_changed": True,
+            "weekly_digest": False,
+        },
+    )
+    db.add(user)
+    await db.flush()
+    return user
+
+
+@router.get("/github/callback")
+async def github_login_callback(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    code: str | None = None,
+    state: str | None = None,
+):
+    """Browser callback for 'Sign in with GitHub'. Exchanges the code, resolves
+    the user, issues a session, and redirects into the SPA with tokens in the
+    URL fragment (kept out of server logs / Referer headers)."""
+    from urllib.parse import urlencode
+
+    from fastapi.responses import RedirectResponse
+
+    from app.services import github_client as gh
+
+    base = settings.frontend_url.rstrip("/")
+
+    def _fail(message: str) -> RedirectResponse:
+        qs = urlencode({"auth": "error", "message": message[:300]})
+        return RedirectResponse(url=f"{base}/?{qs}", status_code=303)
+
+    if not code or not state:
+        return _fail("GitHub sign-in was cancelled.")
+    try:
+        payload = decode_token(state)
+        if payload.get("purpose") != "github_login":
+            raise ValueError("bad purpose")
+    except Exception:
+        return _fail("Invalid sign-in state. Please try again.")
+
+    try:
+        result = await gh.exchange_code(
+            code, redirect_uri=settings.github_login_redirect_uri
+        )
+        token = result.get("token")
+        if not token:
+            return _fail("GitHub did not return an access token.")
+        profile = await gh.get_user(token)
+        email = profile.get("email") or await gh.get_primary_email(token)
+    except Exception:  # noqa: BLE001 — any GitHub-side failure bounces back cleanly
+        return _fail("Could not complete GitHub sign-in.")
+
+    if not email:
+        return _fail("Your GitHub account has no verified email to sign in with.")
+
+    user = await _find_or_create_github_user(db, email, profile)
+
+    info = client_info(request)
+    session = Session(user_id=user.id, last_active_at=utcnow(), **info)
+    db.add(session)
+    db.add(LoginHistory(user_id=user.id, success=True, **info))
+    await db.flush()
+    await _trim_login_history(db, user.id)
+
+    tokens = _token_pair(user.id, session.id)
+    frag = urlencode(
+        {"access_token": tokens.access_token, "refresh_token": tokens.refresh_token}
+    )
+    return RedirectResponse(url=f"{base}/#{frag}", status_code=303)
+
+
 @router.post("/refresh")
 async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
     payload = decode_token(body.refresh_token, expected_type=REFRESH)

@@ -70,6 +70,24 @@ async def test_generate_and_consume(seeded):
     assert r.status_code == 401
 
 
+async def test_direct_consume(seeded):
+    client, headers, _, audit_id = seeded
+    r = await client.post(
+        f"{PREFIX}/audits/{audit_id}/handoff/generate", headers=headers,
+        json={"scope": "all"},
+    )
+    assert r.status_code == 201
+    data = r.json()["data"]
+    url = data["url"]
+    token = url.split("token=")[1]
+
+    # Consume directly without prefix.
+    r = await client.get(f"/handoff/{audit_id}?token={token}")
+    assert r.status_code == 200
+    md = r.text
+    assert "# Akira AI Security Audit Handoff" in md
+
+
 async def test_scope_filtering(seeded):
     client, headers, _, audit_id = seeded
     r = await client.post(

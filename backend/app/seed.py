@@ -14,8 +14,7 @@ import asyncio
 from sqlalchemy import select
 
 from app.core.database import SessionLocal, init_db, utcnow
-from app.core.security import encrypt_secret, hash_password
-from app.models.api_key import STATUS_VALID, ApiKey
+from app.core.security import hash_password, verify_password
 from app.models.optimization_plan import OptimizationGoal, OptimizationPlan
 from app.models.repository import FREQ_DAILY, Repository
 from app.models.scan import (
@@ -127,6 +126,13 @@ async def _get_or_create_user(db) -> User:
         await db.execute(select(User).where(User.email == DEMO_EMAIL))
     ).scalar_one_or_none()
     if user:
+        # Re-assert the demo password every run so a stale/corrupt hash left by an
+        # older seed (or a different bcrypt version) is repaired instead of locking
+        # the demo account out. Seeding is meant to be idempotent and authoritative.
+        if not verify_password(DEMO_PASSWORD, user.password_hash or ""):
+            user.password_hash = hash_password(DEMO_PASSWORD)
+            db.add(user)
+            await db.flush()
         return user
     user = User(
         email=DEMO_EMAIL,
@@ -135,9 +141,7 @@ async def _get_or_create_user(db) -> User:
         display_name="Demo",
         email_verified=True,
         settings={"theme": "dark", "default_scan_mode": "Deep",
-                  "model_settings": {"default_model": "Auto",
-                                     "fallback_order": ["gemini", "openrouter"],
-                                     "token_budgets": {}}},
+                  "model_settings": {"default_tier": "akira_balanced"}},
         privacy={"improve_ai": True, "store_scan_history": True},
         notifications={"scan_complete": True, "critical_found": True,
                        "watchlist_changed": True, "weekly_digest": False, "in_app": True},
@@ -145,33 +149,6 @@ async def _get_or_create_user(db) -> User:
     db.add(user)
     await db.flush()
     return user
-
-
-async def _seed_keys(db, user: User) -> None:
-    from app.core.config import settings
-
-    # Real keys come from DEMO_*_KEY in .env (via settings); fall back to redacted
-    # placeholders so the seed still runs without them.
-    demo_keys = {
-        "gemini": settings.demo_gemini_key or "AIzaSyD-demo-gemini-key-redacted",
-        "openrouter": settings.demo_openrouter_key or "sk-or-demo-openrouter-key-redacted",
-    }
-    existing = {
-        k.provider for k in (
-            await db.execute(select(ApiKey).where(ApiKey.user_id == user.id))
-        ).scalars().all()
-    }
-    for provider, raw in demo_keys.items():
-        if provider in existing:
-            continue
-        # Only mark "valid" for keys that look real (not the redacted placeholder).
-        is_real = "redacted" not in raw
-        db.add(ApiKey(
-            user_id=user.id, provider=provider,
-            encrypted_key=encrypt_secret(raw), last_four=raw[-4:],
-            status=STATUS_VALID if is_real else "unverified",
-            last_verified_at=utcnow() if is_real else None,
-        ))
 
 
 async def _seed_scan(db, user: User) -> Scan | None:
@@ -274,7 +251,6 @@ async def run_seed() -> dict:
 
     async with SessionLocal() as db:
         user = await _get_or_create_user(db)
-        await _seed_keys(db, user)
         scan = await _seed_scan(db, user)
         if scan is not None:
             await _seed_plan_and_watch(db, user, scan)

@@ -9,6 +9,7 @@ distributes calls round-robin across the selected providers.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 from dataclasses import dataclass, field
 
@@ -16,7 +17,6 @@ from typing import AsyncIterator
 
 from app.services.llm_clients import (
     COMPLETERS,
-    PROVIDER_LABELS,
     STREAMERS,
     Completion,
     ProviderError,
@@ -38,8 +38,10 @@ class RouterEvent:
 
 @dataclass
 class ModelRouter:
-    keys: dict[str, str]                    # provider -> api key
-    order: list[str]                        # fallback / distribution order
+    keys: dict[str, str]                    # provider -> server api key
+    order: list[str]                        # fallback / distribution order (providers)
+    models: dict[str, str] = field(default_factory=dict)   # provider -> concrete model id
+    tier_labels: dict[str, str] = field(default_factory=dict)  # provider -> Akira tier label
     mode: str = "auto"                      # auto | manual
     # Usage attribution (Module 16) — set so each call is logged.
     user_id: str | None = None
@@ -64,8 +66,19 @@ class ModelRouter:
     def has_any_key(self) -> bool:
         return any(p in self.keys for p in self.order)
 
-    async def _call(self, provider: str, prompt: str) -> Completion:
-        return await COMPLETERS[provider](self.keys[provider], prompt)
+    async def _call(
+        self, provider: str, prompt: str, response_json: bool = True
+    ) -> Completion:
+        # Use the concrete model chosen for this provider's tier (falls back to
+        # the completer's provider default when unset).
+        func = COMPLETERS[provider]
+        sig = inspect.signature(func)
+        kwargs = {}
+        if "response_json" in sig.parameters:
+            kwargs["response_json"] = response_json
+        return await func(
+            self.keys[provider], prompt, self.models.get(provider), **kwargs
+        )
 
     async def _record(self, comp: Completion) -> None:
         """Log token usage for this call (Module 16). No-op without a user_id."""
@@ -78,15 +91,27 @@ class ModelRouter:
             scan_id=self.scan_id, purpose=self.purpose,
         )
 
-    async def complete(self, prompt: str, model_hint: str | None = None) -> str:
+    async def complete(
+        self, prompt: str, model_hint: str | None = None, response_json: bool = True
+    ) -> str:
         """Return raw model text. Reroutes around rate limits; never raises on a
         provider failure unless every candidate is exhausted — then returns "" so
         the segment is recorded as unanalyzed (the scan still completes)."""
         candidates = self._ordered_candidates(model_hint)
         for provider in candidates:
             try:
-                comp = await self._call_with_backoff(provider, prompt)
+                comp = await self._call_with_backoff(
+                    provider, prompt, response_json=response_json
+                )
                 await self._record(comp)
+                # A 200 with empty content (e.g. a flaky free model returning a
+                # 502-in-200 envelope) should reroute to the next provider rather
+                # than be treated as a successful empty answer.
+                if not (comp.text or "").strip():
+                    nxt = next((p for p in candidates if p != provider and p in self._available()), None)
+                    if nxt:
+                        self.events.append(RouterEvent("rerouted", provider, rerouted_to=nxt))
+                    continue
                 return comp.text
             except RateLimited:
                 self._cool_down(provider)
@@ -109,7 +134,9 @@ class ModelRouter:
         for provider in candidates:
             produced = False
             try:
-                async for delta in STREAMERS[provider](self.keys[provider], prompt):
+                async for delta in STREAMERS[provider](
+                    self.keys[provider], prompt, self.models.get(provider)
+                ):
                     produced = True
                     yield delta
                 return  # finished cleanly
@@ -141,12 +168,14 @@ class ModelRouter:
                 return avail[start:] + avail[:start]
         return avail
 
-    async def _call_with_backoff(self, provider: str, prompt: str) -> Completion:
+    async def _call_with_backoff(
+        self, provider: str, prompt: str, response_json: bool = True
+    ) -> Completion:
         delay = 1.0
         last_exc: Exception | None = None
         for attempt in range(MAX_BACKOFF_RETRIES + 1):
             try:
-                return await self._call(provider, prompt)
+                return await self._call(provider, prompt, response_json=response_json)
             except RateLimited:
                 raise  # handled by caller (cooldown + reroute)
             except (ProviderTimeout, ProviderError) as e:
@@ -160,6 +189,8 @@ class ModelRouter:
         raise last_exc
 
     def label_for(self, provider: str | None) -> str | None:
+        """User-facing attribution label. Returns the Akira tier label for the
+        provider (never the vendor name); falls back to a generic label."""
         if not provider:
             return None
-        return PROVIDER_LABELS.get(provider, provider)
+        return self.tier_labels.get(provider) or "Akira"

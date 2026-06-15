@@ -97,12 +97,13 @@ pytest            # uses in-memory SQLite; no external services needed
 ## Docker
 
 ```bash
-docker compose up --build   # api + postgres + redis
+docker compose up --build   # api + postgres + worker
 ```
 
 Set `DATABASE_URL=postgresql+asyncpg://akira:akira@postgres:5432/akira` in `.env`
-for the compose Postgres. Redis is included for later modules (scan workers,
-rate limiting) and is currently unused.
+for the compose Postgres. The stack needs no Redis: the event bus is in-memory,
+scans run via the polling `worker` service (and in-process BackgroundTasks), and
+rate limiting uses an in-memory window.
 
 ## Module 1 endpoints
 
@@ -203,8 +204,9 @@ REST fallback: `POST /api/v1/scans/{id}/control?command=...`. The orchestrator
 checks the control flag between segments — pause blocks, cancel ends the scan
 cleanly as `cancelled`.
 
-> In-memory = single process. When scans move to a durable worker pool, a Redis
-> pub/sub backend implements the same `bus` interface unchanged.
+> In-memory = single process. Every scan runs inside the API process, so live
+> events always stream to WebSocket clients. (A finished scan with no live
+> listener — e.g. a reconnect — still gets the DB-derived terminal event.)
 
 ## Module 6 (Reports & Exports)
 
@@ -422,11 +424,12 @@ Repo discovery: `GET /api/v1/watchlist/repositories` lists all the user's repos
   `user/ecommerce-api` (15 findings incl. 4 Critical, scores 38/64 matching the
   frontend demo), an optimization plan with goals, a watched repo, and seeds the
   Learning Hub (193 classes) + fun facts (45).
-- **Worker** (`app/worker.py`, `python -m app.worker`) — polls for queued scans
-  and due watchlist re-scans and runs them via the same `run_scan` orchestrator.
-  Structured so arq/Celery handlers can replace the loop body without touching
-  the orchestrator or event bus. Wired as the `worker` service in
-  `docker-compose.yml`.
+- **Maintenance loop** (`app/worker.py:run_maintenance_loop`) — started inside
+  the API process on startup (`app.main.lifespan`). Triggers due watchlist
+  re-scans, claims and runs any queued/orphaned scan via the same `run_scan`
+  orchestrator (in-process, so live events stream), and runs orphan recovery,
+  weekly digests, and the file-cache sweep. No separate worker process: every
+  scan runs where the WebSocket can see it. Run a single API replica.
 - **Migrations** — the initial auth migration plus a second migration covering
   all 20 module tables (`alembic upgrade head`).
 

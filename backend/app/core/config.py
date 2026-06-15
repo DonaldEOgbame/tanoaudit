@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     # App
     app_env: str = "development"
+    # True under pytest (conftest sets AKIRA_TESTING=1). Used to skip the
+    # in-process maintenance loop, which tests drive directly instead.
+    testing: bool = bool(os.environ.get("AKIRA_TESTING"))
     rate_limit_enabled: bool = True
     app_name: str = "Akira AI"
     api_v1_prefix: str = "/api/v1"
@@ -26,6 +29,7 @@ class Settings(BaseSettings):
     # pydantic-settings tries to JSON-parse list fields and rejects "a,b,c").
     cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:5173", "http://localhost:3000",
+        "http://127.0.0.1:5173", "http://127.0.0.1:3000",
     ]
 
     # Database
@@ -61,18 +65,10 @@ class Settings(BaseSettings):
     export_dir: str = "./exports"
     public_base_url: str = "https://akira.ai"
 
-    # Redis (event bus + arq task queue)
-    redis_url: str = "redis://localhost:6379/0"
-    # Connect timeout (seconds) for the event-bus Redis client. Must allow for a
-    # TLS handshake to a managed/remote Redis (e.g. Upstash rediss://), which can
-    # take >1s — too low and the bus silently falls back to in-memory, breaking
-    # cross-process live scan events while arq still works.
-    redis_connect_timeout: float = 5.0
-    # Task dispatch. When enabled AND Redis is reachable, scans/fixes/exports are
-    # enqueued to the arq worker; otherwise they fall back to in-process
-    # execution (FastAPI BackgroundTasks / the polling worker). Auto = decide by
-    # Redis reachability at call time.
-    arq_enabled: bool = True
+    # Where the SPA is served. Used to redirect the browser back into the app
+    # after server-side OAuth callbacks (e.g. GitHub connect).
+    frontend_url: str = "http://localhost:8765"
+
     # File cache for ZIP/URL scan sources (gives fix/implementation gen full-file
     # context). Files are removed when the scan is deleted; this is a safety TTL
     # for orphaned caches, swept by the worker.
@@ -92,22 +88,45 @@ class Settings(BaseSettings):
     # big batches time out and get dropped/retried. Bump for slow providers.
     segment_timeout_s: float = 60.0
 
-    # LLM model IDs per provider (override to track provider releases).
-    # `gemini-flash-latest` works on the free tier; `gemini-2.0-flash` has had
-    # free-tier quota zeroed (limit: 0) — override via GEMINI_MODEL as needed.
+    # --- LLM access (server-side; users never provide keys) ------------------
+    # Server-held provider keys. The app uses these for every user's scans/chat;
+    # there is no bring-your-own-key. Unset -> that provider is unavailable and
+    # scans fall back to the empty-result placeholder (a deploy misconfig, not a
+    # user state). The vendor names are internal only — users pick Akira tiers.
+    gemini_api_key: str | None = None
+    openrouter_api_key: str | None = None
+
+    # Concrete model id backing each user-facing Akira tier (see
+    # services/model_catalog.py). Env-overridable so a tier's backend can change
+    # without touching stored tier ids or the UI. The vendor for each tier is
+    # fixed in the catalog (fast=gemini, balanced/deep=openrouter).
+    tier_fast_model: str = "gemini-flash-latest"
+    tier_balanced_model: str = "anthropic/claude-3.5-haiku"
+    tier_deep_model: str = "anthropic/claude-3.7-sonnet"
+
+    # Per-provider default model ids (used when no tier model is given, e.g. the
+    # llm_clients defaults). Kept in sync with the fast/balanced tiers.
     gemini_model: str = "gemini-flash-latest"
     openrouter_model: str = "anthropic/claude-3.5-haiku"
-    # (Groq removed — no longer offered.)
+
+    # Hard daily cap on scans per user (rolling 24h). At the cap, scan-create
+    # returns 429 with the seconds until the oldest counted scan ages out.
+    daily_scan_limit: int = 5
+
+    # Per-mode daily token limits (rolling 24h). Protects shared server keys.
+    daily_tokens_fast: int = 2_000_000
+    daily_tokens_balanced: int = 1_000_000
+    daily_tokens_deep: int = 500_000
 
     # GitHub OAuth app (Module 11). Without these, OAuth endpoints return a clear
     # "not configured" error; the rest of the app runs fine.
     github_client_id: str | None = None
     github_client_secret: str | None = None
     github_oauth_redirect_uri: str = "http://localhost:8000/api/v1/github/callback"
-
-    # Demo provider keys consumed by `python -m app.seed` (stored per-user).
-    demo_gemini_key: str | None = None
-    demo_openrouter_key: str | None = None
+    # Separate callback for "Sign in with GitHub" (authentication, not the
+    # account-linking flow above). Must be registered as a valid callback URL on
+    # the GitHub OAuth app alongside github_oauth_redirect_uri.
+    github_login_redirect_uri: str = "http://localhost:8000/api/v1/auth/github/callback"
 
     # Optional web-search provider(s) for custom-vuln research.
     # Tavily is the default (AI-focused, 1k free credits/mo); SerpAPI is a

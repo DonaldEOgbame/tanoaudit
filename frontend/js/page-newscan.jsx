@@ -7,43 +7,25 @@
   const { Modal, SevDot } = window;
   const API = window.AkiraAPI;
 
-  // Friendly labels + accent colors for the provider ids the backend returns
-  // (GET /settings/models → { fallback_order: ["gemini","openrouter", ...] }).
-  // Unknown ids fall back to a titleized name and a neutral color so we never crash.
-  const MODEL_LABELS = {
-    gemini: "Gemini 2.0 Flash",
-    openrouter: "OpenRouter / Claude Haiku",
+  // Accent colors per Akira tier (purely cosmetic; vendor never referenced).
+  const TIER_COLORS = {
+    akira_fast: "#7aa2f7",
+    akira_balanced: "#9ece6a",
+    akira_deep: "#c792ea",
   };
-  const MODEL_COLORS = {
-    gemini: "#7aa2f7",
-    openrouter: "#c792ea",
-  };
-  function titleize(id) {
-    return String(id || "").replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  }
-  // Normalize the /settings/models payload into [{ id, name, color }].
-  // The endpoint returns provider ids in `fallback_order` (no name/color fields),
-  // so we derive a display name + color, defaulting anything unrecognized.
-  function modelsFromSettings(data) {
-    const ids = (data && Array.isArray(data.fallback_order)) ? data.fallback_order : [];
-    return ids.map((id) => ({
-      id,
-      name: MODEL_LABELS[id] || titleize(id),
-      color: MODEL_COLORS[id] || "var(--text-3)",
-    }));
-  }
 
-  // Load the model list once (shared by StepConfig + StepReview via props).
-  function useModels() {
-    const [state, setState] = useState({ loading: true, error: null, models: [] });
+  // Count of the user's custom-vulnerability rules, for the "active rules" copy.
+  function useCustomCount() {
+    const [count, setCount] = useState(null);
     useEffect(() => {
+      if (!API) return;
       let alive = true;
-      API.settings.getModels()
-        .then((data) => { if (alive) setState({ loading: false, error: null, models: modelsFromSettings(data) }); })
-        .catch((e) => { if (alive) setState({ loading: false, error: (e && e.message) || "Failed to load models", models: [] }); });
+      API.customVulns.list()
+        .then((res) => { if (alive) setCount(Array.isArray(res) ? res.length : ((res && res.items && res.items.length) || 0)); })
+        .catch(() => { if (alive) setCount(null); });
       return () => { alive = false; };
     }, []);
-    return state;
+    return count;
   }
 
   // Load the connected user's GitHub repos. A 400/empty result means "not
@@ -73,11 +55,17 @@
   // Returns { source_type, repo|source_url, branch, depth, model_mode, models,
   // include_custom, include_optimization, file? } — file is the ZIP File object
   // (only for zip sources), consumed by the upload path in app.jsx.
+  //
+  // The user picks one scan profile, which fixes both the coverage (depth) and
+  // the engine (tier). We send the tier as model_mode "manual" with a
+  // single-element models list; the backend still keeps every other tier as a
+  // tail fallback for rate-limit rerouting.
   function buildConfig(source, cfg) {
+    const p = cfg.profile;
     const base = {
-      depth: cfg.depth,
-      model_mode: cfg.modelMode,
-      models: cfg.modelMode === "manual" ? cfg.models : ["gemini", "openrouter"],
+      depth: profileDepth(p),
+      model_mode: "manual",
+      models: [p.tier],
       include_custom: cfg.incCustom,
       include_optimization: cfg.incOpt,
     };
@@ -116,23 +104,36 @@
     );
   }
 
+  // A scan profile bundles BOTH coverage (depth → segment cap) and engine (tier)
+  // into one choice, so the user makes a single decision instead of two
+  // overlapping ones. `depth` and `tier` map straight onto the backend contract
+  // (Scan.depth + model_mode/models); `seg` mirrors the backend cap per depth.
+  const PROFILES = [
+    { id: "fast", label: "Fast", tier: "akira_fast", time: "~5 min", seg: 120,
+      desc: "Surface pass with the quickest engine. Up to ~120 segments — critical security issues and obvious code stubs." },
+    { id: "balanced", label: "Balanced", tier: "akira_balanced", depth: "deep", time: "~15 min", seg: 400,
+      desc: "Recommended. Balanced engine over ~400 segments — full security, optimization, and stub/placeholder coverage." },
+    { id: "thorough", label: "Thorough", tier: "akira_deep", time: "~30 min", seg: 800,
+      desc: "Exhaustive sweep with the deepest engine. Up to ~800 segments — widest coverage for large repositories." },
+  ];
+  // The backend `depth` value for a profile (defaults to the profile id, which
+  // already matches the fast/thorough depth keys; balanced overrides to "deep").
+  const profileDepth = (p) => p.depth || p.id;
+  const PROFILE_TIER_COLORS = { akira_fast: TIER_COLORS.akira_fast, akira_balanced: TIER_COLORS.akira_balanced, akira_deep: TIER_COLORS.akira_deep };
+
   function NewScanModal({ onClose, onStart }) {
     const [step, setStep] = useState(1);
     const [dir, setDir] = useState("fwd");
     const [source, setSource] = useState({ tab: "github", repo: "", url: "", file: null });
-    const [depth, setDepth] = useState("deep");
-    const [modelMode, setModelMode] = useState("auto");
-    const [models, setModels] = useState(["gemini", "openrouter"]);
+    // The single scan profile (id). Defaults to Balanced (the recommended one).
+    const [profile, setProfile] = useState("balanced");
     const [incCustom, setIncCustom] = useState(true);
     const [incOpt, setIncOpt] = useState(true);
 
-    const modelState = useModels();
+    const customCount = useCustomCount();
+    const activeProfile = PROFILES.find((p) => p.id === profile) || PROFILES[1];
 
     const go = (n) => { setDir(n > step ? "fwd" : "back"); setStep(n); };
-
-    const depthMap = { fast: { label: "Fast", time: "~5 min", seg: 120, desc: "Surface-level pass. Checks critical security vulnerabilities and code stubs." },
-      deep: { label: "Deep", time: "~15 min", seg: 318, desc: "Recommended. Full security, optimization, and code stub/placeholder coverage." },
-      thorough: { label: "Thorough", time: "~30 min", seg: 540, desc: "Exhaustive pass. Full coverage with cross-model validation for critical findings." } };
 
     return h(Modal, { onClose, width: 600 },
       h("div", { style: { padding: "18px 22px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" } },
@@ -141,14 +142,14 @@
       ),
       h("div", { style: { padding: 22, overflowY: "auto", flex: 1 } },
         step === 1 && h(StepSource, { dir, source, setSource }),
-        step === 2 && h(StepConfig, { dir, depth, setDepth, depthMap, modelMode, setModelMode, models, setModels, incCustom, setIncCustom, incOpt, setIncOpt, modelState }),
-        step === 3 && h(StepReview, { dir, source, depth: depthMap[depth], models, modelMode, incCustom, incOpt, modelState }),
+        step === 2 && h(StepConfig, { dir, profile, setProfile, incCustom, setIncCustom, incOpt, setIncOpt, customCount }),
+        step === 3 && h(StepReview, { dir, source, profile: activeProfile, incCustom, incOpt, customCount }),
       ),
       h("div", { style: { padding: "14px 22px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" } },
         step > 1 ? h("button", { className: "btn btn-ghost", onClick: () => go(step - 1) }, h(Icons.chevL, { size: 15 }), "Back") : h("span", null),
         step < 3
           ? h("button", { className: "btn btn-primary", onClick: () => go(step + 1), disabled: !canContinue(step, source) }, "Continue", h(Icons.chevR, { size: 15 }))
-          : h("button", { className: "btn btn-primary btn-lg", onClick: () => onStart(buildConfig(source, { depth, modelMode, models, incCustom, incOpt })), style: { position: "relative", overflow: "hidden" } },
+          : h("button", { className: "btn btn-primary btn-lg", onClick: () => onStart(buildConfig(source, { profile: activeProfile, incCustom, incOpt })), style: { position: "relative", overflow: "hidden" } },
               h(Icons.play, { size: 16 }), "Start Scan"),
       ),
     );
@@ -225,51 +226,30 @@
     );
   }
 
-  function StepConfig({ dir, depth, setDepth, depthMap, modelMode, setModelMode, models, setModels, incCustom, setIncCustom, incOpt, setIncOpt, modelState }) {
-    const allModels = modelState.models;
-    const toggleModel = (id) => setModels((m) => m.includes(id) ? m.filter((x) => x !== id) : [...m, id]);
+  function StepConfig({ dir, profile, setProfile, incCustom, setIncCustom, incOpt, setIncOpt, customCount }) {
+    const ruleDesc = customCount == null ? "Rules from your library"
+      : customCount === 0 ? "No custom rules yet — add some in your library"
+      : customCount + (customCount === 1 ? " active rule" : " active rules") + " from your library";
     return h("div", { className: "step-panel" + (dir === "back" ? " back" : "") },
-      h("h3", { style: { fontSize: 16, fontWeight: 650, marginBottom: 14 } }, "Scan configuration"),
-      h("label", { className: "flabel" }, "Scan depth"),
+      h("h3", { style: { fontSize: 16, fontWeight: 650, marginBottom: 4 } }, "Scan configuration"),
+      h("p", { style: { fontSize: 12.5, color: "var(--text-3)", marginBottom: 14 } }, "Each profile sets both the coverage and the engine. Akira automatically reroutes around rate limits."),
+      h("label", { className: "flabel" }, "Scan profile"),
       h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 18 } },
-        Object.entries(depthMap).map(([k, v]) =>
-          h("div", { key: k, className: "sel-card" + (depth === k ? " sel" : ""), onClick: () => setDepth(k) },
+        PROFILES.map((p) => {
+          const sel = profile === p.id;
+          return h("div", { key: p.id, className: "sel-card" + (sel ? " sel" : ""), onClick: () => setProfile(p.id) },
             h("div", { className: "sel-check" }, h(Icons.check, { size: 13, sw: 2.5 })),
-            h("div", { style: { fontWeight: 650, fontSize: 14 } }, v.label),
-            h("div", { style: { fontSize: 12, color: "var(--accent)", fontWeight: 600, margin: "2px 0 6px" } }, v.time),
-            h("div", { style: { fontSize: 11.5, color: "var(--text-2)", lineHeight: 1.4 } }, v.desc),
-          )),
+            h("div", { style: { display: "flex", alignItems: "center", gap: 7, fontWeight: 650, fontSize: 14 } },
+              h("span", { style: { width: 9, height: 9, borderRadius: "50%", background: PROFILE_TIER_COLORS[p.tier] || "var(--text-3)", flexShrink: 0 } }),
+              p.label),
+            h("div", { style: { fontSize: 12, color: "var(--accent)", fontWeight: 600, margin: "2px 0 6px" } }, p.time),
+            h("div", { style: { fontSize: 11.5, color: "var(--text-2)", lineHeight: 1.4 } }, p.desc),
+          );
+        }),
       ),
-      h("label", { className: "flabel" }, "Model selection"),
-      h("div", { style: { display: "flex", gap: 6, marginBottom: 10, background: "var(--bg-inset)", padding: 4, borderRadius: "var(--r-md)", width: "fit-content" } },
-        [["auto", "Auto (recommended)"], ["manual", "Manual"]].map(([id, label]) =>
-          h("button", { key: id, onClick: () => setModelMode(id),
-            style: { padding: "6px 14px", borderRadius: 6, fontSize: 12.5, fontWeight: 550,
-              background: modelMode === id ? "var(--bg-surface)" : "transparent", color: modelMode === id ? "var(--text-1)" : "var(--text-2)",
-              boxShadow: modelMode === id ? "var(--shadow-card)" : "none" } }, label)),
-      ),
-      modelMode === "auto"
-        ? h("div", { style: { fontSize: 12.5, color: "var(--text-2)", background: "var(--bg-inset)", padding: "10px 12px", borderRadius: "var(--r-md)", marginBottom: 18, display: "flex", gap: 8 } },
-            h(Icons.sparkle, { size: 15, style: { color: "var(--accent)", flexShrink: 0 } }),
-            "Akira AI picks the best model per segment and automatically reroutes around rate limits.")
-        : modelState.loading
-          ? h("div", { style: { fontSize: 12.5, color: "var(--text-3)", padding: "12px 0", marginBottom: 18 } }, "Loading models…")
-          : modelState.error
-            ? h("div", { style: { fontSize: 12.5, color: "var(--danger, var(--text-2))", background: "var(--bg-inset)", padding: "10px 12px", borderRadius: "var(--r-md)", marginBottom: 18 } }, modelState.error)
-            : allModels.length === 0
-              ? h("div", { style: { fontSize: 12.5, color: "var(--text-3)", background: "var(--bg-inset)", padding: "10px 12px", borderRadius: "var(--r-md)", marginBottom: 18 } }, "No models configured. Use Auto, or set a model fallback order in Settings → Models.")
-              : h("div", { style: { display: "flex", flexDirection: "column", gap: 6, marginBottom: 18 } },
-                  allModels.map((m) =>
-                    h("button", { key: m.id, onClick: () => toggleModel(m.id),
-                      className: "sel-card", style: { padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, borderWidth: 1.5,
-                        borderColor: models.includes(m.id) ? "var(--accent)" : "var(--border)", background: models.includes(m.id) ? "var(--accent-soft)" : "var(--bg-surface)" } },
-                      h("span", { style: { width: 9, height: 9, borderRadius: "50%", background: m.color } }),
-                      h("span", { style: { flex: 1, textAlign: "left", fontSize: 13, fontWeight: 550 } }, m.name),
-                      models.includes(m.id) && h(Icons.check, { size: 15, style: { color: "var(--accent)" } }))),
-                ),
       h("label", { className: "flabel" }, "Include in this scan"),
       h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
-        h(ToggleRow, { on: incCustom, set: setIncCustom, title: "Custom vulnerabilities", desc: "5 active rules from your library" }),
+        h(ToggleRow, { on: incCustom, set: setIncCustom, title: "Custom vulnerabilities", desc: ruleDesc }),
         h(ToggleRow, { on: incOpt, set: setIncOpt, title: "Optimization engine", desc: "Performance, code quality, scalability & deps" }),
       ),
     );
@@ -285,16 +265,16 @@
     );
   }
 
-  function StepReview({ dir, source, depth, models, modelMode, incCustom, incOpt, modelState }) {
-    const allModels = (modelState && modelState.models) || [];
-    const activeModels = modelMode === "auto" ? allModels : allModels.filter((m) => models.includes(m.id));
+  function StepReview({ dir, source, profile, incCustom, incOpt, customCount }) {
+    const customLabel = !incCustom ? "Off" : (customCount == null ? "On" : (customCount + " active"));
     const srcLabel = source.tab === "github" ? source.repo : source.tab === "url" ? (source.url || "—") : (source.fileName || "uploaded.zip");
+    const TIER_NAMES = { akira_fast: "Akira Fast", akira_balanced: "Akira Balanced", akira_deep: "Akira Deep" };
     const rows = [
       ["Source", srcLabel, "github"],
-      ["Scan depth", depth.label + " · " + depth.time, "clock"],
-      ["Est. segments", "~" + depth.seg, "layers"],
+      ["Profile", profile.label + " · " + profile.time, "clock"],
+      ["Coverage", "up to ~" + profile.seg + " segments", "layers"],
       ["Engines", "Security & Stubs" + (incOpt ? " + Optimization" : ""), "shield"],
-      ["Custom rules", incCustom ? "5 active" : "Off", "bug"],
+      ["Custom rules", customLabel, "bug"],
     ];
     return h("div", { className: "step-panel" + (dir === "back" ? " back" : "") },
       h("h3", { style: { fontSize: 16, fontWeight: 650, marginBottom: 4 } }, "Review & start"),
@@ -306,11 +286,11 @@
             h("span", { style: { fontSize: 13, color: "var(--text-2)", flex: 1 } }, label),
             h("span", { style: { fontSize: 13, fontWeight: 600 } }, val))),
       ),
-      h("div", { style: { fontSize: 12.5, color: "var(--text-2)", marginBottom: 8 } }, "Active models"),
+      h("div", { style: { fontSize: 12.5, color: "var(--text-2)", marginBottom: 8 } }, "Engine"),
       h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
-        activeModels.map((m) =>
-          h("span", { key: m.id, className: "badge", style: { background: "var(--bg-active)", color: "var(--text-1)", padding: "5px 11px", fontSize: 12 } },
-            h("span", { style: { width: 8, height: 8, borderRadius: "50%", background: m.color } }), m.name))),
+        h("span", { className: "badge", style: { background: "var(--bg-active)", color: "var(--text-1)", padding: "5px 11px", fontSize: 12 } },
+          h("span", { style: { width: 8, height: 8, borderRadius: "50%", background: PROFILE_TIER_COLORS[profile.tier] || "var(--text-3)" } }),
+          TIER_NAMES[profile.tier] || profile.label)),
     );
   }
 })();

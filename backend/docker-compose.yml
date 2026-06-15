@@ -1,4 +1,9 @@
 services:
+  # Single service: scans run inside the API process so their progress always
+  # streams over the WebSocket (live events are never lost to a separate
+  # process). The API also runs the in-process maintenance loop (scheduled
+  # watchlist re-scans, orphan recovery, digests, file-cache sweep) on startup.
+  # Run a single replica — the loop is not designed for multi-process claiming.
   api:
     build: .
     env_file: .env
@@ -6,20 +11,6 @@ services:
       - "8000:8000"
     depends_on:
       - postgres
-      - redis
-
-  # Worker for scan orchestration. Primary dispatch is the arq task queue
-  # (retries, backpressure, runs the watchlist/orphan-recovery/digest crons).
-  # Scales horizontally: run multiple replicas safely.
-  # Redis-less / dev fallback: swap the command for the polling worker —
-  #   command: ["python", "-m", "app.worker"]
-  worker:
-    build: .
-    command: ["arq", "app.worker.WorkerSettings"]
-    env_file: .env
-    depends_on:
-      - postgres
-      - redis
 
   postgres:
     image: postgres:16-alpine
@@ -31,11 +22,6 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
 
 volumes:
   pgdata:

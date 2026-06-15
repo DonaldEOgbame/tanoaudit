@@ -1,7 +1,6 @@
-"""Lightweight fixed-window rate limiter.
+"""Lightweight in-memory fixed-window rate limiter.
 
-Backed by Redis when available (shared across processes), else an in-memory
-counter (single process). Used as a FastAPI dependency on expensive/abusable
+A single-process counter used as a FastAPI dependency on expensive/abusable
 endpoints (auth, scan start, handoff generation, full fix, chat).
 """
 from __future__ import annotations
@@ -13,31 +12,15 @@ from fastapi import Depends, Request
 from app.core.config import settings
 from app.core.errors import APIError
 
-# In-memory fallback store: key -> (window_start_epoch, count)
+# In-memory store: key -> (window_start_epoch, count)
 _local: dict[str, tuple[int, int]] = {}
-
-
-async def _redis():
-    from app.services.scan_events import bus
-    return await bus._get_redis()  # reuse the bus's lazy connection
 
 
 async def _hit(key: str, limit: int, window: int) -> bool:
     """Return True if the call is allowed; False if over the limit."""
-    redis = await _redis()
     now = int(time.time())
     bucket = now // window
     full_key = f"akira:rl:{key}:{bucket}"
-    if redis is not None:
-        # Fail open to the in-memory window if a Redis op hiccups (timeout, drop):
-        # the rate limiter must never 500 the endpoint it's protecting.
-        try:
-            count = await redis.incr(full_key)
-            if count == 1:
-                await redis.expire(full_key, window)
-            return count <= limit
-        except Exception:  # noqa: BLE001
-            pass
     # In-memory fixed window.
     start, count = _local.get(full_key, (now, 0))
     count += 1

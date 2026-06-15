@@ -14,6 +14,17 @@ from app.services.repositories import resolve_or_create_repo, compute_change
 from tests.conftest import PREFIX
 
 
+@pytest.fixture(autouse=True)
+def _approve_plan_validation(monkeypatch):
+    """Plan creation now gates on AI validation, which needs provider keys (absent
+    in tests). Stub it to 'approved' so CRUD tests exercise the create logic; the
+    real validation behavior is covered by test_validate_* below, which call the
+    endpoint directly without this stub's effect on the verdict shape."""
+    async def _approved(goals, context, router):
+        return {"status": "approved"}
+    monkeypatch.setattr("app.api.optimization_plans.validate_goals", _approved)
+
+
 async def _uid(client, headers):
     r = await client.get(f"{PREFIX}/profile", headers=headers)
     return r.json()["data"]["id"]
@@ -140,7 +151,9 @@ async def test_goal_update_and_delete(repo_ctx):
 
 
 # ---- Plan validation (SSE) --------------------------------------------------
-async def test_validate_flags_vague_goals(repo_ctx):
+async def test_validate_requires_ai_no_heuristic_fallback(repo_ctx):
+    """Validation is AI-only. With no provider keys (test env), it must surface an
+    error event — never silently approve and never fall back to a heuristic."""
     client, headers, _, repo_id = repo_ctx
     r = await client.post(
         f"{PREFIX}/optimization-plans/validate", headers=headers,
@@ -149,8 +162,49 @@ async def test_validate_flags_vague_goals(repo_ctx):
     assert r.status_code == 200
     body = r.text
     assert "event: validating" in body
-    # "make it faster" is vague -> issues_found (heuristic, no keys).
-    assert "event: issues_found" in body
+    # No keys → honest error, NOT a fabricated approval or heuristic verdict.
+    assert "event: error" in body
+    assert "event: approved" not in body
+    assert "event: issues_found" not in body
+
+
+async def test_create_plan_gated_by_validation(repo_ctx, monkeypatch):
+    """Create is a hard gate: if validation flags issues, the plan is NOT saved
+    (422 with the per-goal issues). This holds for direct API calls, not just UI."""
+    client, headers, _, repo_id = repo_ctx
+    issues = [{"goal_index": 0, "problem": "Too vague", "suggestion": "Add a metric"}]
+
+    async def _issues(goals, context, router):
+        return {"status": "issues", "issues": issues}
+    monkeypatch.setattr("app.api.optimization_plans.validate_goals", _issues)
+
+    r = await client.post(
+        f"{PREFIX}/optimization-plans", headers=headers,
+        json={"repository_id": repo_id, "name": "Bad plan", "goals": [{"text": "improve"}]},
+    )
+    assert r.status_code == 422
+    err = r.json()["error"]
+    assert err["code"] == "plan_validation_failed"
+    assert err["issues"] == issues
+    # Nothing was persisted.
+    r = await client.get(f"{PREFIX}/optimization-plans", headers=headers)
+    assert len(r.json()["data"]) == 0
+
+
+async def test_create_plan_blocked_when_validation_unavailable(repo_ctx, monkeypatch):
+    """If validation can't run (no AI), creation is blocked — never saved unvalidated."""
+    client, headers, _, repo_id = repo_ctx
+
+    async def _err(goals, context, router):
+        return {"status": "error", "error": "AI validation is unavailable right now."}
+    monkeypatch.setattr("app.api.optimization_plans.validate_goals", _err)
+
+    r = await client.post(
+        f"{PREFIX}/optimization-plans", headers=headers,
+        json={"repository_id": repo_id, "name": "P", "goals": [{"text": "Cut latency 40%"}]},
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "plan_validation_unavailable"
 
 
 # ---- Goal auto-advance ------------------------------------------------------

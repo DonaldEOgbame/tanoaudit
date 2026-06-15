@@ -23,12 +23,33 @@ def oauth_authorize_url(state: str) -> str:
         "redirect_uri": settings.github_oauth_redirect_uri,
         "scope": "repo read:org",
         "state": state,
+        # Force GitHub to show the account/authorization chooser instead of
+        # silently re-granting whoever is already signed in. Lets a user connect
+        # a different account after disconnecting, rather than being bounced
+        # straight back into their previous one.
+        "prompt": "select_account",
     }
     return f"https://github.com/login/oauth/authorize?{urlencode(params)}"
 
 
-async def exchange_code(code: str) -> dict:
-    """Exchange an OAuth code for an access token. Returns {token, scopes}."""
+def login_authorize_url(state: str) -> str:
+    """Authorize URL for 'Sign in with GitHub'. Uses the login callback and the
+    minimal scope needed to read the user's identity + verified email."""
+    params = {
+        "client_id": settings.github_client_id,
+        "redirect_uri": settings.github_login_redirect_uri,
+        "scope": "read:user user:email",
+        "state": state,
+        "prompt": "select_account",
+    }
+    return f"https://github.com/login/oauth/authorize?{urlencode(params)}"
+
+
+async def exchange_code(code: str, redirect_uri: str | None = None) -> dict:
+    """Exchange an OAuth code for an access token. Returns {token, scopes}.
+
+    `redirect_uri` defaults to the account-linking callback; the login flow
+    passes its own callback (it must match the one used to start the flow)."""
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
         r = await c.post(
             "https://github.com/login/oauth/access_token",
@@ -37,11 +58,29 @@ async def exchange_code(code: str) -> dict:
                 "client_id": settings.github_client_id,
                 "client_secret": settings.github_client_secret,
                 "code": code,
-                "redirect_uri": settings.github_oauth_redirect_uri,
+                "redirect_uri": redirect_uri or settings.github_oauth_redirect_uri,
             },
         )
     data = r.json()
     return {"token": data.get("access_token"), "scopes": data.get("scope", "")}
+
+
+async def get_primary_email(token: str) -> str | None:
+    """Return the user's primary verified email (the /user payload often omits
+    email when it's set to private)."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+            r = await c.get(f"{_API}/user/emails", headers=_headers(token))
+        if r.status_code != 200:
+            return None
+        emails = r.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    primary = next((e for e in emails if e.get("primary") and e.get("verified")), None)
+    if primary:
+        return primary.get("email")
+    verified = next((e for e in emails if e.get("verified")), None)
+    return verified.get("email") if verified else None
 
 
 def _headers(token: str) -> dict:
