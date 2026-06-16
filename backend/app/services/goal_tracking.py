@@ -20,10 +20,14 @@ from app.models.optimization_plan import (
 from app.models.scan import STATUS_FIXED, Finding
 
 
-def _status_for(findings: list[Finding]) -> str | None:
-    """Derive a goal status from its tagged findings, or None to leave manual."""
+def _status_for(findings: list[Finding]) -> str:
+    """Derive a goal status from its tagged findings.
+
+    Goals are scan-driven: there is no manual override. A goal with no tagged
+    findings is Pending (waiting for the next scan to link findings to it).
+    """
     if not findings:
-        return None  # no tagged findings -> don't override manual status
+        return GOAL_PENDING  # no tagged findings -> always reset to Pending
     fixed = sum(1 for f in findings if f.status == STATUS_FIXED)
     if fixed == len(findings):
         return GOAL_DONE
@@ -53,10 +57,10 @@ async def advance_goals_for_repo(repository_id: str) -> None:
                         select(Finding).where(Finding.goal_id == goal.id)
                     )
                 ).scalars().all()
-                new_status = _status_for(tagged)
-                if new_status is not None:
-                    goal.status = new_status
+                # _status_for always returns a value; no manual override is allowed
+                goal.status = _status_for(tagged)
         await db.commit()
+
 
 
 _STOPWORDS = {

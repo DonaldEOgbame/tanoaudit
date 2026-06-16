@@ -154,7 +154,7 @@
   // text/event-stream). onEvent(data) is called per `data:` line (parsed JSON
   // when possible, else the raw string). Resolves when the stream ends; the
   // returned object has abort(). Auth + 401-refresh mirror request().
-  async function stream(path, body, onEvent, opts) {
+  function stream(path, body, onEvent, opts) {
     opts = opts || {};
     const controller = new AbortController();
     const run = async (retried) => {
@@ -386,6 +386,7 @@
   // --- custom vulnerabilities ----------------------------------------------
   const customVulns = {
     list() { return get("/custom-vulnerabilities"); },
+    get(id) { return get("/custom-vulnerabilities/" + id); },
     create(body) { return post("/custom-vulnerabilities", body); },
     update(id, body) { return patch("/custom-vulnerabilities/" + id, body); },
     remove(id) { return del("/custom-vulnerabilities/" + id); },

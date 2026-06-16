@@ -72,13 +72,12 @@
 
     // Live sidebar counters: watchlist alerts, custom-vuln rules, GitHub status.
     const [meta, setMeta] = useState({ alerts: 0, customCount: null, ghConnected: false });
-    useEffect(() => {
+
+    function reloadMeta() {
       const API = window.AkiraAPI;
       if (!API) return;
-      let alive = true;
       Promise.allSettled([API.watchlist.alerts(), API.customVulns.list(), API.github.status()])
         .then(([al, cv, gh]) => {
-          if (!alive) return;
           const alertsArr = al.status === "fulfilled" ? (al.value && (al.value.items || al.value)) : [];
           const cvArr = cv.status === "fulfilled" ? (cv.value && (cv.value.items || cv.value)) : null;
           const ghVal = gh.status === "fulfilled" ? gh.value : null;
@@ -88,7 +87,14 @@
             ghConnected: !!(ghVal && (ghVal.connected || ghVal.status === "connected")),
           });
         });
-      return () => { alive = false; };
+    }
+
+    useEffect(() => {
+      reloadMeta();
+      window.addEventListener("akira:custom-vulns-changed", reloadMeta);
+      return () => {
+        window.removeEventListener("akira:custom-vulns-changed", reloadMeta);
+      };
     }, []);
 
     // Resolve each NAV row's badge/count/status from live data (falls back to

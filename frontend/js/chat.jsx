@@ -628,4 +628,5 @@ Is there a specific finding, file, or category you'd like me to explain?`;
         h("div", { style: { textAlign: "center", fontSize: 11.5, color: "var(--text-3)", marginTop: 9 } }, "Akira can only discuss this scan’s findings."))));
   }
   window.ReportChat = ReportChat;
+  window.renderMarkdown = renderMarkdown;
 })();

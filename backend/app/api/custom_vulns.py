@@ -1,6 +1,7 @@
 """Module 9 router: custom-vulnerability CRUD + streamed research pipeline."""
 from __future__ import annotations
 
+import asyncio
 import json
 
 from fastapi import APIRouter, Depends
@@ -20,7 +21,12 @@ from app.schemas.custom_vuln import (
     CustomVulnUpdate,
     ResearchRequest,
 )
-from app.services.research import RESEARCH_COMPLETED, SearchConfig, run_research
+from app.services.research import (
+    RESEARCH_COMPLETED,
+    RESEARCH_FAILED,
+    SearchConfig,
+    run_research,
+)
 from app.services.router_factory import build_router_for_user
 
 router = APIRouter(prefix="/custom-vulnerabilities", tags=["custom-vulns"])
@@ -112,16 +118,45 @@ async def research(
             tavily_key=settings.tavily_key, serpapi_key=settings.serpapi_key
         )
         definition = None
-        async for event_type, payload in run_research(
-            name, description, router_obj, search_cfg
-        ):
-            if event_type == RESEARCH_COMPLETED:
-                definition = payload.get("definition")
-            # Embed the event name in the data payload too: the frontend SSE
-            # helper only reads `data:` lines (not the `event:` line), so the
-            # stage is carried inside the JSON for the research animation.
-            data = {"event": event_type, **payload}
-            yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+
+        # Pump the research generator through a queue so we can interleave SSE
+        # heartbeat comments (": ping") while the long synthesis step (~20s LLM
+        # call) produces no events. Browsers drop an idle streaming connection
+        # during that gap, which truncated the stream before research_completed.
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def produce():
+            try:
+                async for item in run_research(name, description, router_obj, search_cfg):
+                    await queue.put(("event", item))
+            except Exception as exc:  # noqa: BLE001
+                await queue.put(("error", str(exc)))
+            finally:
+                await queue.put(("done", None))
+
+        task = asyncio.create_task(produce())
+        try:
+            while True:
+                try:
+                    kind, item = await asyncio.wait_for(queue.get(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"  # heartbeat keeps the connection alive
+                    continue
+                if kind == "done":
+                    break
+                if kind == "error":
+                    err = {"event": RESEARCH_FAILED, "status": "error", "error": item}
+                    yield f"event: {RESEARCH_FAILED}\ndata: {json.dumps(err)}\n\n"
+                    break
+                event_type, payload = item
+                if event_type == RESEARCH_COMPLETED:
+                    definition = payload.get("definition")
+                # Embed the event name in the data payload too: the frontend SSE
+                # helper only reads `data:` lines (not the `event:` line).
+                data = {"event": event_type, **payload}
+                yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+        finally:
+            task.cancel()
 
         # Persist the structured definition.
         if definition is not None:

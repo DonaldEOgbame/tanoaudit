@@ -12,9 +12,14 @@
   // Returns null when there's no content so empty sections are skipped.
   function ResultSection(label, body) {
     if (!body || !String(body).trim()) return null;
+    const formattedBody = String(body)
+      .replace(/\\r\\n/g, "\n")
+      .replace(/\\n/g, "\n")
+      .replace(/\r\n/g, "\n");
+    const content = window.renderMarkdown ? window.renderMarkdown(formattedBody) : formattedBody;
     return h("div", { key: label },
       h("div", { style: { fontSize: 10.5, fontWeight: 650, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 } }, label),
-      h("p", { style: { fontSize: 12.5, lineHeight: 1.6, color: "var(--text-1)", margin: 0 } }, body));
+      h("div", { style: { fontSize: 12.5, lineHeight: 1.6, color: "var(--text-1)", margin: 0 } }, content));
   }
 
   // Map backend severity (may include "info") onto the badge set the UI knows.
@@ -59,6 +64,7 @@
     const [error, setError] = useState(null);
     const [adding, setAdding] = useState(false);
     const [editing, setEditing] = useState(null);
+    const [viewing, setViewing] = useState(null);
     const [busy, setBusy] = useState({}); // id -> bool (toggle/delete in flight)
 
     const load = useCallback(async () => {
@@ -66,6 +72,7 @@
       try {
         const rows = await API.customVulns.list();
         setVulns(rows || []);
+        window.dispatchEvent(new Event("akira:custom-vulns-changed"));
       } catch (e) {
         setError(errMsg(e));
       } finally {
@@ -94,6 +101,7 @@
         await API.customVulns.remove(v.id);
         setVulns((vs) => vs.filter((x) => x.id !== v.id));
         toast({ kind: "info", msg: "Rule deleted" });
+        window.dispatchEvent(new Event("akira:custom-vulns-changed"));
       } catch (e) {
         toast({ kind: "error", msg: errMsg(e) });
         setBusy((b) => Object.assign({}, b, { [v.id]: false }));
@@ -117,18 +125,20 @@
                 h("div", { style: { fontSize: 12, color: "var(--text-2)", marginTop: 1 } }, v.description || "No description")),
               h(Switch, { on: v.active, onChange: (on) => toggleActive(v, on) }),
               h("button", { className: "icon-btn", "data-tip": "Edit", onClick: () => setEditing(v) }, h(Icons.edit, { size: 14 })),
+              v.researched && h("button", { className: "icon-btn", "data-tip": "See Research", onClick: () => setViewing(v) }, h(Icons.eye, { size: 14 })),
               h("button", { className: "icon-btn", "data-tip": "Delete", disabled: !!busy[v.id], onClick: () => remove(v) }, h(Icons.trash, { size: 14 })))),
           vulns.length === 0 && h("div", { className: "empty-state" },
             h("div", { className: "es-icon" }, h(Icons.bug, { size: 24 })),
             h("h3", null, "No custom rules yet"),
             h("p", null, "Describe a vulnerability unique to your stack and Akira AI will research it and add it to every scan.")))),
       adding && h(AddVulnModal, { toast, onClose: () => setAdding(false), onSaved: () => { setAdding(false); load(); } }),
-      editing && h(AddVulnModal, { toast, vuln: editing, onClose: () => setEditing(null), onSaved: () => { setEditing(null); load(); } }));
+      editing && h(AddVulnModal, { toast, vuln: editing, onClose: () => setEditing(null), onSaved: () => { setEditing(null); load(); } }),
+      viewing && h(AddVulnModal, { toast, vuln: viewing, initialPhase: "result", onClose: () => setViewing(null), onSaved: () => { setViewing(null); load(); } }));
   }
   window.CustomVulnsPage = CustomVulnsPage;
 
-  function AddVulnModal({ onClose, onSaved, vuln, toast }) {
-    const [phase, setPhase] = useState("form"); // form | research | result
+  function AddVulnModal({ onClose, onSaved, vuln, toast, initialPhase = "form" }) {
+    const [phase, setPhase] = useState(initialPhase); // form | research | result
     const [name, setName] = useState(vuln ? vuln.name : "");
     const [desc, setDesc] = useState(vuln ? (vuln.description || "") : "");
     const [sev, setSev] = useState(vuln ? uiSev(vuln.severity) : "high");
@@ -136,7 +146,13 @@
     // Live research SSE state.
     const [queries, setQueries] = useState([]);
     const [synth, setSynth] = useState(false);
-    const [result, setResult] = useState(null); // { what_it_is, detection_patterns, what_to_look_for, how_to_fix, source_urls }
+    const [result, setResult] = useState(vuln && vuln.researched ? {
+      what_it_is: vuln.what_it_is,
+      detection_patterns: vuln.detection_patterns,
+      what_to_look_for: vuln.what_to_look_for,
+      how_to_fix: vuln.how_to_fix,
+      source_urls: vuln.source_urls || [],
+    } : null);
     const [researchErr, setResearchErr] = useState(null);
     const streamRef = useRef(null);
 
@@ -167,6 +183,7 @@
       const body = { name, description: desc };
       if (vuln) body.custom_vuln_id = vuln.id;
       let gotDefinition = null;
+      let savedId = null;
       let streamErr = null;
       try {
         const handle = API.stream("/custom-vulnerabilities/research", body, (ev) => {
@@ -174,19 +191,18 @@
           // only reads `data:` lines, not the `event:` line). Drive the animation
           // off that so the synthesizing stage and completion are accurate.
           if (!ev || typeof ev !== "object") return;
-          // Capture animation stages.
           if (ev.event === "search_query_sent" && ev.query) {
             setQueries((qs) => qs.includes(ev.query) ? qs : [...qs, ev.query]);
           } else if (ev.event === "synthesizing") {
             setSynth(true);
           } else if (ev.event === "research_failed") {
             streamErr = ev.error || "Research failed";
+          } else if (ev.event === "saved" && ev.id) {
+            savedId = ev.id;
           } else if (!ev.event && ev.query) {
-            // back-compat: payloads without an explicit event field
             setQueries((qs) => qs.includes(ev.query) ? qs : [...qs, ev.query]);
           }
-          // Capture the definition from ANY event that carries one (normally
-          // research_completed). Robust to event-name changes / reorderings.
+          // Capture the definition from ANY event that carries one.
           if (ev.definition && (ev.definition.what_it_is || ev.definition.detection_patterns)) {
             gotDefinition = ev.definition;
             setSynth(true);
@@ -195,11 +211,31 @@
         });
         streamRef.current = handle;
         await handle.promise;
-        // Only show "complete" once we actually have the researched definition.
+
+        // Fallback: the backend persists the researched row even if the final SSE
+        // event was missed in transit. If we streamed successfully but didn't
+        // capture the definition, read it back from the saved row before deciding
+        // it failed — so we never show "didn't return a result" on a real success.
+        if (!gotDefinition && !streamErr) {
+          try {
+            const list = await API.customVulns.list();
+            const rows = Array.isArray(list) ? list : (list && list.items) || [];
+            const row = savedId ? rows.find((r) => r.id === savedId)
+              : rows.find((r) => r.name === name && r.researched);
+            if (row && (row.what_it_is || row.detection_patterns)) {
+              gotDefinition = {
+                what_it_is: row.what_it_is, detection_patterns: row.detection_patterns,
+                what_to_look_for: row.what_to_look_for, how_to_fix: row.how_to_fix,
+                source_urls: row.source_urls || [],
+              };
+              setResult(gotDefinition);
+            }
+          } catch (e) { /* fall through to error below */ }
+        }
+
         if (gotDefinition) {
           setPhase("result");
         } else {
-          // Stream ended without a definition — surface honestly, don't claim done.
           const msg = streamErr || "Research didn't return a result. Try again.";
           setResearchErr(msg);
           setPhase("form");
@@ -215,7 +251,7 @@
     return h(Modal, { onClose, width: 560 },
       h("div", { style: { padding: "16px 22px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" } },
         h("h3", { style: { fontSize: 15, fontWeight: 650 } },
-          phase === "form" ? (vuln ? "Edit custom vulnerability" : "Add custom vulnerability") : phase === "research" ? "Researching…" : "Research complete"),
+          phase === "form" ? (vuln ? "Edit custom vulnerability" : "Add custom vulnerability") : phase === "research" ? "Researching…" : (initialPhase === "result" ? "Research Details" : "Research complete")),
         h("button", { className: "icon-btn", onClick: onClose }, h(Icons.x, { size: 16 }))),
       h("div", { style: { padding: 22, overflowY: "auto" } },
         phase === "form" && h("div", { className: "step-panel" },
@@ -275,7 +311,7 @@
             h("button", { className: "btn btn-primary", disabled: saving || (!name.trim() && !desc.trim()), onClick: saveBasic }, saving ? h("div", { className: "spinner", style: { width: 13, height: 13 } }) : null, "Save Changes")
           ) :
           h(React.Fragment, null,
-            h("button", { className: "btn btn-secondary", onClick: saveBasic, disabled: saving || (!name.trim() && !desc.trim()) }, "Add without research"),
+            h("button", { className: "btn btn-secondary", onClick: onClose, disabled: saving }, "Cancel"),
             h("button", { className: "btn btn-primary", disabled: saving || (!name.trim()), onClick: startResearch }, h(Icons.search, { size: 14 }), "Research & Add"))),
         phase === "result" && h("button", { className: "btn btn-primary", onClick: onSaved }, "Done")));
   }
@@ -323,22 +359,6 @@
       }
     }
 
-    async function toggleGoal(goal) {
-      const next = goal.status === "Done" ? "Pending" : "Done";
-      try {
-        const updatedGoal = await API.plans.updateGoal(goal.id, { status: next });
-        // updateGoal returns the updated goal, not a plan — patch it into the
-        // correct plan's goals array.
-        setPlans((ps) => ps.map((plan) => {
-          if (!plan.goals.some((g) => g.id === goal.id)) return plan;
-          return Object.assign({}, plan, {
-            goals: plan.goals.map((g) => g.id === goal.id ? (updatedGoal || Object.assign({}, g, { status: next })) : g),
-          });
-        }));
-      } catch (e) {
-        toast({ kind: "error", msg: errMsg(e) });
-      }
-    }
 
     if (loading) return h("div", { className: "vs-page-pad vs-page-enter" }, h(PageHead, { title: "Optimization Plans" }), h("div", { className: "card" }, h(LoadingBlock, { label: "Loading plans…" })));
     if (error) return h("div", { className: "vs-page-pad vs-page-enter" }, h(PageHead, { title: "Optimization Plans" }), h("div", { className: "card" }, h(ErrorBlock, { msg: error, onRetry: load })));
@@ -355,18 +375,29 @@
         h("div", { style: { display: "grid", gridTemplateColumns: "1fr 280px", gap: 16, alignItems: "start" } },
           h("div", { className: "card", style: { padding: 6 } },
             p.goals.length === 0 && h("div", { className: "empty-state", style: { padding: "26px 0" } }, h("p", null, "No goals yet.")),
-            p.goals.map((g, i) =>
-              h("div", { key: g.id, style: { display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderTop: i ? "1px solid var(--border)" : "none" } },
-                h("button", { className: "icon-btn", title: g.status === "Done" ? "Mark not done" : "Mark done", onClick: () => toggleGoal(g),
-                  style: { width: 22, height: 22, padding: 0, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                  background: g.status === "Done" ? "var(--sev-clean)" : "var(--bg-active)", color: g.status === "Done" ? "#fff" : "var(--text-3)",
-                  border: g.status === "In progress" ? "2px solid var(--sev-low)" : "none" } },
-                  g.status === "Done" && h(Icons.check, { size: 13, sw: 2.6 })),
-                h("span", { style: { flex: 1, fontSize: 13.5, textDecoration: g.status === "Done" ? "line-through" : "none", color: g.status === "Done" ? "var(--text-3)" : "var(--text-1)" } }, g.text),
-                h("span", { style: { fontSize: 11.5, fontWeight: 600, color: statusColor[g.status] } }, g.status))),
+            p.goals.map((g, i) => {
+              const isDone = g.status === "Done";
+              const isInProgress = g.status === "In progress";
+              const indicatorStyle = {
+                width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: isDone ? "var(--sev-clean)" : isInProgress ? "transparent" : "var(--bg-active)",
+                color: isDone ? "#fff" : "var(--text-3)",
+                border: isInProgress ? "2px solid var(--sev-low)" : "none",
+                cursor: "default",
+              };
+              return h("div", { key: g.id, style: { display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderTop: i ? "1px solid var(--border)" : "none" } },
+                h("div", { style: indicatorStyle, title: isDone ? "Completed — all linked findings fixed" : isInProgress ? "In progress — some findings fixed" : "Pending — advances automatically when linked findings are fixed" },
+                  isDone && h(Icons.check, { size: 13, sw: 2.6 })),
+                h("div", { style: { flex: 1, minWidth: 0 } },
+                  h("span", { style: { fontSize: 13.5, textDecoration: isDone ? "line-through" : "none", color: isDone ? "var(--text-3)" : "var(--text-1)" } }, g.text),
+                  g.status === "Pending" && h("div", { style: { fontSize: 11, color: "var(--text-3)", marginTop: 2, display: "flex", alignItems: "center", gap: 4 } },
+                    h(Icons.clock, { size: 11 }), "Waiting for next scan")),
+                h("span", { style: { fontSize: 11.5, fontWeight: 600, color: statusColor[g.status], flexShrink: 0 } }, g.status));
+            }),
           ),
           h("div", { style: { display: "flex", flexDirection: "column", gap: 12 } },
-            h("div", { className: "card", style: { padding: 18, textAlign: "center" } },
+            h("div", { className: "card", style: { padding: 18, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" } },
               h(Ring, { value: p.health, size: 84, stroke: 6, color: p.health > 80 ? "var(--sev-clean)" : "var(--sev-high)" }),
               h("div", { style: { fontSize: 12.5, fontWeight: 600, marginTop: 8 } }, "Plan health"),
               h("div", { style: { fontSize: 11.5, color: "var(--text-3)", marginTop: 2 } }, "Based on goal progress & linked findings")),
@@ -499,7 +530,10 @@
             h(Dropdown, { width: "100%", value: priority, onChange: setPriority,
               options: [{ value: "High", label: "High" }, { value: "Medium", label: "Medium" }, { value: "Low", label: "Low" }] })),
           h("label", { className: "flabel" }, "Goals (one per line)"),
-          h("textarea", { className: "field", rows: 4, placeholder: "Cut p95 checkout latency by 40%\nRemove N+1 queries from order flows\nAdd caching for category tree", value: goalsText, onChange: (e) => setGoalsText(e.target.value), style: { resize: "none", marginBottom: 4 } })),
+          h("p", { style: { fontSize: 11.5, color: "var(--text-3)", marginTop: -8, marginBottom: 8 } },
+            h(Icons.info, { size: 11, style: { display: "inline", verticalAlign: "middle", marginRight: 4 } }),
+            "Goals must be trackable through security scan findings — e.g. fixing vulnerabilities or patching CVEs. Goals advance automatically when linked findings are resolved."),
+          h("textarea", { className: "field", rows: 4, placeholder: "Fix all high-severity SQL injection findings\nEliminate dependencies with known CVEs\nRemove hardcoded API keys from source\nResolve all critical authentication bypass findings", value: goalsText, onChange: (e) => setGoalsText(e.target.value), style: { resize: "none", marginBottom: 4 } })),
         phase === "validating" && h("div", { className: "step-panel", style: { textAlign: "center", padding: "26px 0" } },
           h("div", { style: { display: "inline-flex", alignItems: "center", gap: 12, padding: "14px 22px", borderRadius: "var(--r-lg)", background: "var(--bg-inset)", border: "1px solid var(--border)" } },
             h("div", { className: "spinner" }),
