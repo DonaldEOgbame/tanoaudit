@@ -28,7 +28,6 @@
   const NAV = [
     { section: "Scans", icon: "list", page: "scans" },
     { section: "Watchlist", icon: "bookmark", page: "watchlist", badge: "↑3" },
-    { section: "Reports", icon: "report", page: "reports" },
     { section: "Custom Vulnerabilities", icon: "bug", page: "custom", count: 5 },
     { section: "Optimization Plans", icon: "sliders", page: "plans" },
     { section: "Integrations", icon: "github", page: "integrations", status: true },
@@ -47,27 +46,168 @@
     return (a + b).toUpperCase();
   }
 
+  // A single recent-scan row in the sidebar, with a hover "⋯" button that
+  // opens a Rename / Pin / Delete menu. Inline-renames in place.
+  function ScanRow({ scan: s, nav, menuOpen, renaming, onOpenMenu, onCloseMenu,
+                     onStartRename, onRename, onCancelRename, onPin, onShare, onDelete }) {
+    const rowRef = useRef();
+    const menuRef = useRef();
+    const inputRef = useRef();
+    // A scan that didn't complete (cancelled/failed) has no valid severity or
+    // scores — show it muted, not as a peer of real reports.
+    const incomplete = s.status === "cancelled" || s.status === "canceled" || s.status === "failed";
+    const label = s.displayName || (s.repo.includes("/") ? s.repo.split("/")[1] : s.repo);
+
+    // Close the menu on outside click / Escape.
+    useEffect(() => {
+      if (!menuOpen) return;
+      const onDoc = (e) => { if (menuRef.current && !menuRef.current.contains(e.target) && rowRef.current && !rowRef.current.contains(e.target)) onCloseMenu(); };
+      const onKey = (e) => { if (e.key === "Escape") onCloseMenu(); };
+      setTimeout(() => document.addEventListener("mousedown", onDoc), 0);
+      document.addEventListener("keydown", onKey);
+      return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+    }, [menuOpen]);
+
+    useEffect(() => { if (renaming && inputRef.current) { inputRef.current.focus(); inputRef.current.select(); } }, [renaming]);
+
+    if (renaming) {
+      return h("div", { className: "sb-item", style: { paddingLeft: 10 } },
+        incomplete
+          ? h("span", { style: { width: 7, height: 7, borderRadius: "50%", background: "var(--text-3)", flexShrink: 0 } })
+          : h(SevDot, { sev: s.sev }),
+        h("input", {
+          ref: inputRef, defaultValue: label,
+          className: "sb-rename-input",
+          style: {
+            flex: 1, minWidth: 0, fontSize: 12.5, background: "var(--bg-inset)",
+            border: "1px solid var(--accent)", borderRadius: 4, color: "var(--text-1)", padding: "2px 6px",
+          },
+          onClick: (e) => e.stopPropagation(),
+          onKeyDown: (e) => {
+            if (e.key === "Enter") onRename(e.target.value);
+            else if (e.key === "Escape") onCancelRename();
+          },
+          onBlur: (e) => onRename(e.target.value),
+        }),
+      );
+    }
+
+    return h("div", { ref: rowRef, className: "sb-scan-row" + (menuOpen ? " menu-open" : ""), style: { position: "relative" } },
+      h("button", { className: "sb-item",
+        onClick: () => nav("report", s.id),
+        style: { paddingLeft: 10, opacity: incomplete ? 0.5 : 1, width: "100%" },
+        "data-tip": incomplete ? ("Scan " + s.status) : undefined },
+        incomplete
+          ? h("span", { style: { width: 7, height: 7, borderRadius: "50%", background: "var(--text-3)", flexShrink: 0 } })
+          : h(SevDot, { sev: s.sev }),
+        s.pinned && h(Icons.pin, { size: 11, style: { color: "var(--accent)", flexShrink: 0 } }),
+        h("span", { className: "sbi-label", style: { fontSize: 12.5 } }, label),
+        h("span", { style: { fontSize: 11, color: "var(--text-3)", fontVariantNumeric: "tabular-nums" } }, s.issues),
+      ),
+      // Hover-revealed "⋯" trigger (always visible while its menu is open).
+      h("button", {
+        className: "sb-scan-more icon-btn",
+        onClick: (e) => { e.stopPropagation(); onOpenMenu(); },
+        "data-tip": menuOpen ? null : "More",
+        style: {
+          position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)",
+          width: 24, height: 24, borderRadius: 6,
+        },
+      }, h(Icons.more, { size: 16 })),
+      menuOpen && h("div", { ref: menuRef, className: "popover",
+        style: { top: "calc(100% - 2px)", right: 4, left: "auto", width: 160, zIndex: 9999 } },
+        h("button", { className: "menu-item", onClick: onStartRename },
+          h(Icons.edit, { size: 14, style: { color: "var(--text-2)" } }), "Rename"),
+        h("button", { className: "menu-item", onClick: onPin },
+          h(Icons.pin, { size: 14, style: { color: "var(--text-2)" } }), s.pinned ? "Unpin" : "Pin"),
+        h("button", { className: "menu-item", onClick: onShare },
+          h(Icons.share, { size: 14, style: { color: "var(--text-2)" } }), "Share"),
+        h("div", { className: "menu-sep" }),
+        h("button", { className: "menu-item", onClick: onDelete, style: { color: "var(--sev-critical)" } },
+          h(Icons.trash, { size: 14 }), "Delete"),
+      ),
+    );
+  }
+
   function Sidebar({ page, nav, collapsed, setCollapsed, onNewScan, onCmd, openSettings, demoState, user, onLogout }) {
+    const toast = window.useToast ? window.useToast() : (() => {});
     const [profileOpen, setProfileOpen] = useState(false);
     // Recent scans from the backend (falls back to demo data if the call fails).
     const [scans, setScans] = useState([]);
-    useEffect(() => {
-      let alive = true;
+    // Which scan row's "⋯" menu is open (by id), and which is being renamed.
+    const [menuFor, setMenuFor] = useState(null);
+    const [renameFor, setRenameFor] = useState(null);
+    // Scan pending delete confirmation (shown via in-app modal, not window.confirm).
+    const [confirmDel, setConfirmDel] = useState(null);
+
+    function loadScans() {
       if (!window.AkiraAPI) { setScans(window.VS_SCANS || []); return; }
       window.AkiraAPI.scans.list({ limit: 8 })
         .then((res) => {
-          if (!alive) return;
           const items = (res && res.items) || [];
           setScans(items.map((s) => ({
             id: s.id,
             repo: s.repo || s.source_url || "scan",
+            displayName: s.display_name || "",
+            pinned: !!s.pinned,
             sev: (s.worst_severity && s.worst_severity !== "clean") ? s.worst_severity : "info",
+            status: s.status || "",
             issues: s.status === "completed" ? "" : (s.status || ""),
           })));
         })
-        .catch(() => { if (alive) setScans([]); });
-      return () => { alive = false; };
-    }, []);
+        .catch(() => setScans([]));
+    }
+    useEffect(() => { loadScans(); }, []);
+
+    function pinScan(s) {
+      setMenuFor(null);
+      const next = !s.pinned;
+      setScans((arr) => arr.map((x) => x.id === s.id ? { ...x, pinned: next } : x));
+      if (window.AkiraAPI) window.AkiraAPI.scans.setPinned(s.id, next).then(loadScans).catch(loadScans);
+    }
+    function renameScan(s, name) {
+      setRenameFor(null);
+      const clean = (name || "").trim();
+      setScans((arr) => arr.map((x) => x.id === s.id ? { ...x, displayName: clean } : x));
+      if (window.AkiraAPI) window.AkiraAPI.scans.rename(s.id, clean).catch(loadScans);
+    }
+    function deleteScan(s) {
+      setMenuFor(null);
+      setConfirmDel(s);
+    }
+    function confirmDeleteScan() {
+      const s = confirmDel;
+      setConfirmDel(null);
+      if (!s) return;
+      setScans((arr) => arr.filter((x) => x.id !== s.id));
+      if (window.AkiraAPI) window.AkiraAPI.scans.remove(s.id).then(loadScans).catch(loadScans);
+    }
+    // Create-or-reuse a read-only share link and copy it to the clipboard
+    // (same flow as the report page's Share popover).
+    function shareScan(s) {
+      setMenuFor(null);
+      const API = window.AkiraAPI;
+      if (!API) { toast({ kind: "info", msg: "Sharing isn't available in preview mode." }); return; }
+      const toLink = (r) => {
+        if (!r) return "";
+        const slug = r.slug || r.token || r.id;
+        return r.url || (API.BASE.replace("/api/v1", "") + "/api/v1/public/reports/" + slug);
+      };
+      API.reports.getShare(s.id)
+        .then((r) => (r && (r.slug || r.url || r.id)) ? r : API.reports.createShare(s.id))
+        .catch(() => API.reports.createShare(s.id))
+        .then((r) => {
+          const link = toLink(r);
+          if (!link) throw new Error("no link");
+          if (navigator.clipboard) navigator.clipboard.writeText(link);
+          toast({ kind: "success", msg: "Share link copied to clipboard" });
+        })
+        .catch((e) => toast({ kind: "error", msg: "Couldn't create share link: " + ((e && e.message) || "error") }));
+    }
+
+    // Pinned scans float to the top (the API already sorts this way, but keep
+    // the order stable after optimistic local pin toggles).
+    const sortedScans = [...scans].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
     const hasScans = scans.length > 0;
 
     // Live sidebar counters: watchlist alerts, custom-vuln rules, GitHub status.
@@ -156,14 +296,20 @@
         !collapsed && h("div", { className: "sb-section-label", style: { marginTop: 8 } }, "Scans"),
         collapsed && h("button", { className: "sb-item" + (page === "scans" ? " active" : ""), onClick: () => nav("scans"), "data-tip": "Scans" }, h(Icons.list, { size: 17 })),
         !collapsed && hasScans && h("div", { style: { marginBottom: 4 } },
-          scans.slice(0, 5).map((s) =>
-            h("button", { key: s.id, className: "sb-item",
-              onClick: () => nav("report", s.id),
-              style: { paddingLeft: 10 } },
-              h(SevDot, { sev: s.sev }),
-              h("span", { className: "sbi-label", style: { fontSize: 12.5 } }, (s.repo.includes("/") ? s.repo.split("/")[1] : s.repo)),
-              h("span", { style: { fontSize: 11, color: "var(--text-3)", fontVariantNumeric: "tabular-nums" } }, s.issues),
-            ))),
+          sortedScans.slice(0, 6).map((s) =>
+            h(ScanRow, {
+              key: s.id, scan: s, nav,
+              menuOpen: menuFor === s.id,
+              renaming: renameFor === s.id,
+              onOpenMenu: () => setMenuFor((v) => v === s.id ? null : s.id),
+              onCloseMenu: () => setMenuFor(null),
+              onStartRename: () => { setMenuFor(null); setRenameFor(s.id); },
+              onRename: (name) => renameScan(s, name),
+              onCancelRename: () => setRenameFor(null),
+              onPin: () => pinScan(s),
+              onShare: () => shareScan(s),
+              onDelete: () => deleteScan(s),
+            }))),
         !collapsed && !hasScans && h("div", { style: { padding: "4px 10px 8px", fontSize: 12, color: "var(--text-3)" } }, "No scans yet"),
       ),
 
@@ -179,6 +325,23 @@
         ),
         profileOpen && h(ProfilePopover, { onClose: () => setProfileOpen(false), openSettings, collapsed, user, onLogout }),
       ),
+
+      // Delete confirmation (in-app modal, replaces the native browser confirm).
+      confirmDel && window.Modal && h(window.Modal, { width: 420, onClose: () => setConfirmDel(null) },
+        h("div", { style: { padding: "20px 22px" } },
+          h("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 10 } },
+            h("div", { style: { width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--sev-critical-soft, rgba(239,68,68,0.12))", color: "var(--sev-critical)", flexShrink: 0 } },
+              h(Icons.trash, { size: 16 })),
+            h("div", { style: { fontSize: 15, fontWeight: 650, color: "var(--text-1)" } }, "Delete scan?"),
+          ),
+          h("div", { style: { fontSize: 13, color: "var(--text-2)", lineHeight: 1.5, marginBottom: 18 } },
+            "Delete ", h("strong", null, (confirmDel.displayName || confirmDel.repo || "this scan")),
+            " and all of its data? This can't be undone."),
+          h("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8 } },
+            h("button", { className: "btn", onClick: () => setConfirmDel(null) }, "Cancel"),
+            h("button", { className: "btn", style: { background: "var(--sev-critical)", color: "#fff", borderColor: "var(--sev-critical)" }, onClick: confirmDeleteScan }, "Delete"),
+          ),
+        )),
     );
   }
   window.Sidebar = Sidebar;
@@ -245,7 +408,7 @@
     }, []);
 
     const commands = [...scanCmds];
-    [["Dashboard", "home", "dashboard"], ["Watchlist", "bookmark", "watchlist"], ["Reports", "report", "reports"],
+    [["Dashboard", "home", "dashboard"], ["Watchlist", "bookmark", "watchlist"],
      ["Custom Vulnerabilities", "bug", "custom"], ["Optimization Plans", "sliders", "plans"], ["Integrations", "github", "integrations"],
      ["Learning Hub", "book", "learning"]].forEach(([label, icon, page]) =>
       commands.push({ type: "Navigate", label, icon, action: () => nav(page) }));

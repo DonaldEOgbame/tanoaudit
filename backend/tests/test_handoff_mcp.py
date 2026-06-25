@@ -97,6 +97,41 @@ async def test_scope_filtering(seeded):
     assert r.json()["data"]["finding_count"] == 1  # only the critical
 
 
+async def test_attack_paths_included_in_handoff(seeded):
+    """A detected attack chain referencing in-scope findings is rendered in the
+    handoff markdown; an optimizations-only handoff carries no chains."""
+    client, headers, _, audit_id = seeded
+    from app.models.attack_path import AttackPath
+    async with SessionLocal() as db:
+        db.add(AttackPath(
+            scan_id=audit_id, public_id="CHN-0001", name="SQLi to account takeover",
+            severity="critical", tier="confirmed",
+            finding_public_ids=["VLN-0001", "VLN-0002"],
+            steps=["Inject via db.raw", "Read credentials", "Take over account"],
+            impact="Full account takeover.", remediation="Parameterize the query.",
+            cwe_id="CWE-89",
+        ))
+        await db.commit()
+
+    # security scope -> chain present
+    async with SessionLocal() as db:
+        scan = await db.get(Scan, audit_id)
+        findings = await ho.select_findings(db, audit_id, "security", None)
+        paths = await ho.select_attack_paths(db, audit_id, findings)
+        md = ho.render_handoff_markdown(scan, findings, paths)
+    assert len(paths) == 1
+    assert "## Attack Chains" in md
+    assert "CHN-0001" in md and "SQLi to account takeover" in md
+    assert "VLN-0001, VLN-0002" in md
+    assert "Take over account" in md
+
+    # optimizations-only scope selects no security findings -> no chains
+    async with SessionLocal() as db:
+        opt_findings = await ho.select_findings(db, audit_id, "optimizations", None)
+        opt_paths = await ho.select_attack_paths(db, audit_id, opt_findings)
+    assert opt_paths == []
+
+
 async def test_invalid_token_generic_401(seeded):
     client, headers, _, audit_id = seeded
     r = await client.get(f"{PREFIX}/audits/{audit_id}/handoff?token=bogus")

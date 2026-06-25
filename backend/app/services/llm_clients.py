@@ -168,11 +168,35 @@ COMPLETERS = {
 
 
 # ---- Streaming --------------------------------------------------------------
-async def stream_gemini(key: str, prompt: str, model: str | None = None):
-    """Yield text deltas from Gemini's SSE streaming endpoint."""
+async def stream_gemini(key: str, prompt: str, model: str | None = None,
+                        messages: list[dict] | None = None):
+    """Yield text deltas from Gemini's SSE streaming endpoint.
+
+    When `messages` is provided (role-separated dicts with 'role'/'content'),
+    the system turn is lifted into a separate systemInstruction so the model
+    genuinely respects it. Falls back to the flat-prompt path when absent.
+    """
     model = model or DEFAULT_MODELS["gemini"]
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent"
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    if messages:
+        # Split the system message out; everything else becomes contents.
+        sys_msgs = [m for m in messages if m.get("role") == "system"]
+        chat_msgs = [m for m in messages if m.get("role") != "system"]
+        payload: dict = {
+            "contents": [
+                {
+                    "role": "model" if m["role"] == "assistant" else "user",
+                    "parts": [{"text": m["content"]}],
+                }
+                for m in chat_msgs
+            ],
+            "generationConfig": {"temperature": 0.3},
+        }
+        if sys_msgs:
+            payload["systemInstruction"] = {"parts": [{"text": sys_msgs[0]["content"]}]}
+    else:
+        payload = {"contents": [{"parts": [{"text": prompt}]}],
+                   "generationConfig": {"temperature": 0.3}}
     try:
         async with httpx.AsyncClient(timeout=_timeout()) as c:
             async with c.stream("POST", url, params={"key": key, "alt": "sse"}, json=payload) as r:
@@ -199,13 +223,16 @@ async def stream_gemini(key: str, prompt: str, model: str | None = None):
         raise ProviderError(f"gemini network error: {type(e).__name__}") from e
 
 
-async def _stream_openai_style(provider, base_url, key, prompt, model, extra_headers=None):
+async def _stream_openai_style(provider, base_url, key, prompt, model,
+                               extra_headers=None, messages: list[dict] | None = None):
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     if extra_headers:
         headers.update(extra_headers)
+    # Use structured messages when provided; fall back to single-user prompt.
+    msg_list = messages if messages else [{"role": "user", "content": prompt}]
     payload = {
-        "model": model, "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0, "stream": True,
+        "model": model, "messages": msg_list,
+        "temperature": 0.3, "stream": True,
     }
     try:
         async with httpx.AsyncClient(timeout=_timeout()) as c:
@@ -233,11 +260,13 @@ async def _stream_openai_style(provider, base_url, key, prompt, model, extra_hea
         raise ProviderError(f"{provider} network error: {type(e).__name__}") from e
 
 
-async def stream_openrouter(key: str, prompt: str, model: str | None = None):
+async def stream_openrouter(key: str, prompt: str, model: str | None = None,
+                            messages: list[dict] | None = None):
     async for d in _stream_openai_style(
         "openrouter", "https://openrouter.ai/api/v1", key, prompt,
         model or DEFAULT_MODELS["openrouter"],
         extra_headers={"HTTP-Referer": "https://akira.ai", "X-Title": "Akira AI"},
+        messages=messages,
     ):
         yield d
 

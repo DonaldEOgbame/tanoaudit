@@ -110,11 +110,11 @@
   // (Scan.depth + model_mode/models); `seg` mirrors the backend cap per depth.
   const PROFILES = [
     { id: "fast", label: "Fast", tier: "akira_fast", time: "~5 min", seg: 120,
-      desc: "Surface pass with the quickest engine. Up to ~120 segments — critical security issues and obvious code stubs." },
+      desc: "Surface pass — up to ~120 segments. Critical security issues and obvious code stubs." },
     { id: "balanced", label: "Balanced", tier: "akira_balanced", depth: "deep", time: "~15 min", seg: 400,
-      desc: "Recommended. Balanced engine over ~400 segments — full security, optimization, and stub/placeholder coverage." },
+      desc: "Recommended. ~400 segments — full security, optimization, and stub/placeholder coverage." },
     { id: "thorough", label: "Thorough", tier: "akira_deep", time: "~30 min", seg: 800,
-      desc: "Exhaustive sweep with the deepest engine. Up to ~800 segments — widest coverage for large repositories." },
+      desc: "Widest coverage — up to ~800 segments for large repositories." },
   ];
   // The backend `depth` value for a profile (defaults to the profile id, which
   // already matches the fast/thorough depth keys; balanced overrides to "deep").
@@ -232,7 +232,7 @@
       : customCount + (customCount === 1 ? " active rule" : " active rules") + " from your library";
     return h("div", { className: "step-panel" + (dir === "back" ? " back" : "") },
       h("h3", { style: { fontSize: 16, fontWeight: 650, marginBottom: 4 } }, "Scan configuration"),
-      h("p", { style: { fontSize: 12.5, color: "var(--text-3)", marginBottom: 14 } }, "Each profile sets both the coverage and the engine. Akira automatically reroutes around rate limits."),
+      h("p", { style: { fontSize: 12.5, color: "var(--text-3)", marginBottom: 14 } }, "Each profile sets how much of the repo Akira scans. It automatically reroutes around rate limits."),
       h("label", { className: "flabel" }, "Scan profile"),
       h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 18 } },
         PROFILES.map((p) => {

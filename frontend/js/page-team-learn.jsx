@@ -25,9 +25,11 @@
       desc && h("p", null, desc));
   }
 
-  function LearningPage() {
+  function LearningPage({ initialSlug } = {}) {
     const [q, setQ] = useState("");
-    const [sel, setSel] = useState(null);            // class slug selected
+    const [sel, setSel] = useState(initialSlug || null);  // class slug selected (deep-link opens directly)
+    const [openCat, setOpenCat] = useState(null);    // category drilled into (directory view)
+    const [shown, setShown] = useState(24);          // load-more cap within a drilled category
     const [advanced, setAdvanced] = useState(false);
     const [cats, setCats] = useState(null);          // [{category, count}]
     const [classes, setClasses] = useState(null);    // [{slug,name,category,...}]
@@ -43,7 +45,10 @@
     useEffect(() => {
       const scroller = document.querySelector(".vs-page");
       if (scroller) scroller.scrollTop = 0;
-    }, [sel]);
+    }, [sel, openCat]);
+
+    // Reset the load-more cap whenever the drilled category or search changes.
+    useEffect(() => { setShown(24); }, [openCat, q]);
 
     // Load categories + the full class list once. The backend caps `limit` at
     // 200, so page through until we have every class.
@@ -152,6 +157,22 @@
       h(Icons.search, { size: 16, style: { position: "absolute", left: 13, top: 11, color: "var(--text-3)" } }),
       h("input", { className: "field", style: { paddingLeft: 38, padding: "10px 12px 10px 38px", fontSize: 14 }, placeholder: "Search vulnerability classes…", value: q, onChange: (e) => setQ(e.target.value) }));
 
+    // A single class card.
+    const classCard = (c) =>
+      h("button", { key: c.slug, className: "card card-hover", style: { padding: "11px 14px", textAlign: "left", display: "flex", alignItems: "center", gap: 9 }, onClick: () => setSel(c.slug) },
+        h(Icons.book, { size: 14, style: { color: "var(--accent)", flexShrink: 0 } }),
+        h("span", { style: { fontSize: 12.5, fontWeight: 550 } }, c.name));
+
+    // A grid of class cards capped at `shown`, with a "Show more" button.
+    const cappedGrid = (list) => {
+      const visible = list.slice(0, shown);
+      return h(React.Fragment, null,
+        h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8 } },
+          visible.map(classCard)),
+        list.length > shown && h("button", { className: "btn btn-ghost btn-sm", style: { marginTop: 12 }, onClick: () => setShown((n) => n + 24) },
+          "Show " + Math.min(24, list.length - shown) + " more (" + (list.length - shown) + " hidden)"));
+    };
+
     let body;
     if (listLoading) {
       body = h("div", { className: "empty-state" }, h("div", { className: "spinner" }));
@@ -159,26 +180,42 @@
       body = h(StateBlock, { icon: Icons.alert, title: "Couldn’t load the Learning Hub", desc: listErr });
     } else {
       const ql = q.trim().toLowerCase();
-      const matches = (classes || []).filter((c) => !ql || c.name.toLowerCase().includes(ql) || (c.category || "").toLowerCase().includes(ql));
-      // Group matched classes by category, preserving the categories() ordering.
-      const byCat = {};
-      matches.forEach((c) => { (byCat[c.category] = byCat[c.category] || []).push(c); });
-      const order = (cats || []).map((c) => c.category).filter((name) => byCat[name]);
-      // Include any categories present in classes but missing from cats list.
-      Object.keys(byCat).forEach((name) => { if (order.indexOf(name) < 0) order.push(name); });
+      const all = classes || [];
+      const countByCat = {};
+      all.forEach((c) => { countByCat[c.category] = (countByCat[c.category] || 0) + 1; });
+      // Category order: from categories() endpoint, then any extras seen in classes.
+      const catOrder = (cats || []).map((c) => c.category).filter((n) => countByCat[n]);
+      Object.keys(countByCat).forEach((n) => { if (catOrder.indexOf(n) < 0) catOrder.push(n); });
 
-      if (order.length === 0) {
-        body = h(StateBlock, { icon: Icons.search, title: "No classes match", desc: ql ? ("Nothing found for “" + q + "”.") : "No learning classes are available." });
+      if (ql) {
+        // SEARCH: flat, cross-category list (capped + load-more).
+        const matches = all.filter((c) => c.name.toLowerCase().includes(ql) || (c.category || "").toLowerCase().includes(ql));
+        body = matches.length === 0
+          ? h(StateBlock, { icon: Icons.search, title: "No classes match", desc: "Nothing found for “" + q + "”." })
+          : h("div", null,
+              h("div", { style: { fontSize: 12.5, color: "var(--text-3)", marginBottom: 10 } }, matches.length + " result" + (matches.length === 1 ? "" : "s")),
+              cappedGrid(matches));
+      } else if (openCat) {
+        // DRILL-IN: one category's classes (capped + load-more).
+        const inCat = all.filter((c) => c.category === openCat);
+        body = h("div", null,
+          h("button", { className: "btn btn-ghost btn-sm", style: { marginBottom: 14 }, onClick: () => setOpenCat(null) },
+            h(Icons.chevL, { size: 14 }), "All categories"),
+          h("h2", { style: { fontSize: 19, fontWeight: 700, letterSpacing: "-0.01em", marginBottom: 4 } }, openCat),
+          h("p", { style: { fontSize: 12.5, color: "var(--text-3)", marginBottom: 16 } }, inCat.length + " class" + (inCat.length === 1 ? "" : "es")),
+          cappedGrid(inCat));
+      } else if (catOrder.length === 0) {
+        body = h(StateBlock, { icon: Icons.book, title: "No classes yet", desc: "Learning classes appear here as scans run." });
       } else {
-        body = order.map((cat) =>
-          h("div", { key: cat, style: { marginBottom: 22 } },
-            h("h3", { style: { fontSize: 13, fontWeight: 650, color: "var(--text-2)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 } }, cat,
-              h("span", { style: { fontWeight: 500, color: "var(--text-3)", marginLeft: 8, textTransform: "none", letterSpacing: 0 } }, byCat[cat].length + " classes")),
-            h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8 } },
-              byCat[cat].map((c) =>
-                h("button", { key: c.slug, className: "card card-hover", style: { padding: "11px 14px", textAlign: "left", display: "flex", alignItems: "center", gap: 9 }, onClick: () => setSel(c.slug) },
-                  h(Icons.book, { size: 14, style: { color: "var(--accent)", flexShrink: 0 } }),
-                  h("span", { style: { fontSize: 12.5, fontWeight: 550 } }, c.name))))));
+        // LANDING: category cards with counts.
+        body = h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 10 } },
+          catOrder.map((cat) =>
+            h("button", { key: cat, className: "card card-hover", style: { padding: "16px 18px", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }, onClick: () => setOpenCat(cat) },
+              h("span", { style: { width: 38, height: 38, borderRadius: 9, background: "var(--accent-soft)", color: "var(--accent)", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, h(Icons.book, { size: 18 })),
+              h("div", { style: { flex: 1, minWidth: 0 } },
+                h("div", { style: { fontSize: 14, fontWeight: 600, letterSpacing: "-0.01em" } }, cat),
+                h("div", { style: { fontSize: 11.5, color: "var(--text-3)", marginTop: 2 } }, countByCat[cat] + " class" + (countByCat[cat] === 1 ? "" : "es"))),
+              h(Icons.chevR, { size: 16, style: { color: "var(--text-3)", flexShrink: 0 } }))));
       }
     }
 
@@ -200,6 +237,7 @@
     const [repos, setRepos] = useState(null);
     const [reposLoading, setReposLoading] = useState(false);
     const [reposErr, setReposErr] = useState(null);
+    const [repoQuery, setRepoQuery] = useState("");
 
     // Webhook deliveries.
     const [deliveries, setDeliveries] = useState(null);
@@ -373,25 +411,51 @@
           : reposErr
             ? h("div", { style: { fontSize: 12, color: "var(--sev-critical)" } }, reposErr)
             : (repos && repos.length > 0)
-              ? h("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
-                  (repoAccess.mode === "selected" ? repos : repos.slice(0, 8)).map((r) => {
-                    if (repoAccess.mode !== "selected") return h(Tag, { key: r.full_name }, r.full_name);
-                    const isOn = selectedSet.has(r.full_name);
-                    return h("button", {
-                      key: r.full_name,
-                      type: "button",
-                      className: "tag",
-                      onClick: () => toggleSelectedRepo(r.full_name),
-                      style: {
-                        cursor: "pointer",
-                        border: "1px solid " + (isOn ? "var(--accent)" : "var(--border)"),
-                        background: isOn ? "var(--accent-soft)" : "transparent",
-                        color: isOn ? "var(--accent)" : "var(--text-2)",
-                        display: "inline-flex", alignItems: "center", gap: 5,
-                      },
-                    }, isOn && h(Icons.check, { size: 11, sw: 2.5 }), r.full_name);
-                  }),
-                  repoAccess.mode !== "selected" && repos.length > 8 && h("span", { style: { fontSize: 12, color: "var(--text-3)", alignSelf: "center" } }, "+" + (repos.length - 8) + " more"))
+              ? (repoAccess.mode === "selected"
+                  ? (() => {
+                      const q = repoQuery.trim().toLowerCase();
+                      const filtered = q ? repos.filter((r) => r.full_name.toLowerCase().includes(q)) : repos;
+                      return h(React.Fragment, null,
+                        h("input", {
+                          type: "text",
+                          value: repoQuery,
+                          onChange: (e) => setRepoQuery(e.target.value),
+                          placeholder: "Search repositories…",
+                          className: "field",
+                          style: { width: "100%", marginBottom: 8, fontSize: 12.5 },
+                        }),
+                        h("div", {
+                          style: {
+                            display: "flex", flexWrap: "wrap", gap: 6,
+                            maxHeight: 220, overflowY: "auto",
+                            padding: 8,
+                            border: "1px solid var(--border)", borderRadius: 8,
+                            background: "var(--bg-1)",
+                          },
+                        },
+                          filtered.length === 0
+                            ? h("span", { style: { fontSize: 12, color: "var(--text-3)" } }, "No repositories match \"" + repoQuery + "\".")
+                            : filtered.map((r) => {
+                                const isOn = selectedSet.has(r.full_name);
+                                return h("button", {
+                                  key: r.full_name,
+                                  type: "button",
+                                  className: "tag",
+                                  onClick: () => toggleSelectedRepo(r.full_name),
+                                  style: {
+                                    cursor: "pointer",
+                                    border: "1px solid " + (isOn ? "var(--accent)" : "var(--border)"),
+                                    background: isOn ? "var(--accent-soft)" : "transparent",
+                                    color: isOn ? "var(--accent)" : "var(--text-2)",
+                                    display: "inline-flex", alignItems: "center", gap: 5,
+                                    height: "fit-content",
+                                  },
+                                }, isOn && h(Icons.check, { size: 11, sw: 2.5 }), r.full_name);
+                              })));
+                    })()
+                  : h("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
+                      repos.slice(0, 8).map((r) => h(Tag, { key: r.full_name }, r.full_name)),
+                      repos.length > 8 && h("span", { style: { fontSize: 12, color: "var(--text-3)", alignSelf: "center" } }, "+" + (repos.length - 8) + " more")))
               : h("div", { style: { fontSize: 12, color: "var(--text-3)" } }, "No repositories found for this account.")),
       h(Section, { title: "Auto-scan triggers", desc: "Run scans automatically on repository events." },
         h(Row, { label: "On push to default branch", on: triggers.on_push, set: (v) => patchSettings(API.github.setTriggers, { on_push: v }, "triggers", "Triggers updated") }),
@@ -419,11 +483,15 @@
           : deliveries.length === 0
             ? h("div", { style: { fontSize: 12, color: "var(--text-3)", padding: "8px 0" } }, "No deliveries yet.")
             : h("div", { style: { border: "1px solid var(--border)", borderRadius: "var(--r-md)", overflow: "hidden" } },
-                deliveries.map((d, i) =>
-                  h("div", { key: d.id || i, style: { display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderTop: i ? "1px solid var(--border)" : "none", fontSize: 12 } },
-                    h("span", { className: "mono", style: { flex: 1 } }, d.event),
-                    h("span", { className: "badge", style: { background: d.status >= 200 && d.status < 300 ? "var(--sev-clean-bg)" : "var(--sev-critical-bg)", color: d.status >= 200 && d.status < 300 ? "var(--sev-clean)" : "var(--sev-critical)" } }, d.status),
-                    h("span", { style: { color: "var(--text-3)" } }, d.created_at ? new Date(d.created_at).toLocaleString() : ""))))),
+                deliveries.map((d, i) => {
+                  const ok = d.status >= 200 && d.status < 300;
+                  return h("div", { key: d.id || i, style: { padding: "8px 12px", borderTop: i ? "1px solid var(--border)" : "none", fontSize: 12 } },
+                    h("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+                      h("span", { className: "mono", style: { flex: 1 } }, d.event),
+                      h("span", { className: "badge", style: { background: ok ? "var(--sev-clean-bg)" : "var(--sev-critical-bg)", color: ok ? "var(--sev-clean)" : "var(--sev-critical)" } }, d.status),
+                      h("span", { style: { color: "var(--text-3)" } }, d.created_at ? new Date(d.created_at).toLocaleString() : "")),
+                    d.detail && h("div", { style: { color: ok ? "var(--text-3)" : "var(--sev-critical)", marginTop: 3, lineHeight: 1.4, wordBreak: "break-word" } }, d.detail));
+                }))),
       h(Section, { title: "GitHub Issues", desc: "Automatically create issues from findings." },
         h(Row, { label: "Auto-create issues", desc: "For findings at or above the threshold", on: issueSettings.auto_create, set: (v) => patchSettings(API.github.setIssueSettings, { auto_create: v }, "issue_settings", "Issue settings updated") }),
         issueSettings.auto_create && h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 } },

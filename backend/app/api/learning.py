@@ -1,10 +1,10 @@
-"""Module 14 router: Learning Hub list / search / detail.
+"""Module 14 router: Learning Hub list / search / detail + finding resolver.
 
-The Learning Hub is a standalone, browsable directory. Findings are not
-cross-linked to it: the previous /for-finding resolver matched the model's
-free-text labels against static class names, which was brittle (frequent 404s,
-no coverage for optimization/stub findings). It was removed in favour of the
-Hub standing on its own. See backend/KNOWN_LIMITATIONS.md.
+The Learning Hub is a browsable directory that also grows with scans. The
+`/for-finding/{id}` resolver maps a finding to its class **by category** (not by
+matching free-text against static names like the old resolver did), and
+generates a class on the fly when a category has none — so "Learn more" always
+lands on a real, relevant page. See app/services/learning_autogen.py.
 """
 from __future__ import annotations
 
@@ -12,10 +12,14 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.core.errors import envelope, not_found
 from app.models.learning import LearningHubClass
+from app.models.user import User
 from app.schemas.learning import ClassDetail, ClassSummary
+from app.services.learning_autogen import resolve_class_for_finding
+from app.services.router_factory import build_router_for_user
 
 router = APIRouter(prefix="/learning-hub", tags=["learning-hub"])
 
@@ -69,6 +73,21 @@ async def list_categories(db: AsyncSession = Depends(get_db)):
         )
     ).all()
     return envelope([{"category": c, "count": n} for c, n in rows])
+
+
+@router.get("/for-finding/{finding_id}")
+async def class_for_finding(
+    finding_id: str,
+    user: User = Depends(get_current_user),
+):
+    """Resolve the Learning Hub class that best explains a finding, generating
+    one on the fly if its category has no class yet. Returns the slug so the
+    frontend can deep-link "Learn more" straight to the relevant page."""
+    router_obj = await build_router_for_user(user.id, purpose="learning")
+    slug = await resolve_class_for_finding(finding_id, user.id, router=router_obj)
+    if slug is None:
+        raise not_found("No learning class for this finding")
+    return envelope({"slug": slug})
 
 
 @router.get("/classes/{slug}")

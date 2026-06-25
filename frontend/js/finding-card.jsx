@@ -1,7 +1,7 @@
 // Akira AI — FindingCard (two-panel diff, AI fix, actions)
 (function () {
   const React = window.React;
-  const { useState, useEffect, useRef } = React;
+  const { useState } = React;
   const h = React.createElement;
   const Icons = window.Icons;
   const { SevBadge, Tag, CodeBlock } = window;
@@ -20,50 +20,24 @@
     const [fpOpen, setFpOpen] = useState(false);
     const [fpReason, setFpReason] = useState("");
     const [leaving, setLeaving] = useState(false);
-    const [fixState, setFixState] = useState("idle"); // idle | loading | done
-    const [fixText, setFixText] = useState("");
     const [copied, setCopied] = useState(false);
     const [intentional, setIntentional] = useState(!!(f._raw && f._raw.intentional));
     const [issueState, setIssueState] = useState("idle"); // idle | loading
-    const fixCtl = useRef(null);
+    const [learnLoading, setLearnLoading] = useState(false);
 
     const realId = f._raw && f._raw.id;
     const isStub = f.type === "stub";
 
-    // Abort any in-flight fix stream when the card unmounts.
-    useEffect(() => () => { if (fixCtl.current && fixCtl.current.abort) fixCtl.current.abort(); }, []);
-    const FULL_FIX = isStub
-      ? "Completing the stub in " + f.file + "…\n\n1. " + f.fixSummary + "\n2. Implemented the behavior the function name and signature imply.\n3. Added the missing validation / error paths.\n\nThe completed implementation is shown in the diff panel. Review the assumptions before merging."
-      : "Applying fix to " + f.file + "…\n\n1. " + f.fixSummary + "\n2. Added input validation guard upstream.\n3. Updated unit tests: " + f.file.replace("src/", "test/").replace(".js", ".test.js") + "\n\nThe corrected implementation is shown in the diff panel. This change is backwards-compatible and requires no migration.";
-
-    // Real finding: stream the fix/implementation from the backend. Demo
-    // finding (no _raw id): keep the canned typewriter so the showcase renders.
-    function genFix() {
-      setFixState("loading"); setFixText("");
-      if (realId && API) {
-        let acc = "";
-        const gen = isStub ? API.findings.generateImplementation : API.findings.generateFix;
-        const ctl = gen.call(API.findings, realId, (evt) => {
-          if (evt && typeof evt === "object") {
-            if (evt.delta) { acc += evt.delta; setFixText(acc); }
-            if (evt.done) setFixState("done");
-            if (evt.error) { setFixText("⚠️ " + evt.error); setFixState("done"); }
-          } else if (typeof evt === "string") {
-            acc += evt; setFixText(acc);
-          }
-        });
-        fixCtl.current = ctl;
-        ctl.promise
-          .then(() => setFixState((s) => (s === "loading" ? "done" : s)))
-          .catch((e) => { setFixText((t) => t || ("⚠️ " + ((e && e.message) || "Generation failed."))); setFixState("done"); });
-        return;
-      }
-      let i = 0;
-      const iv = setInterval(() => {
-        i += Math.ceil(Math.random() * 4 + 2);
-        setFixText(FULL_FIX.slice(0, i));
-        if (i >= FULL_FIX.length) { clearInterval(iv); setFixState("done"); }
-      }, 30);
+    // "Learn more": resolve this finding to its Learning Hub class and deep-link
+    // straight to it. Real findings hit the resolver (which generates a class on
+    // the fly if the category is new); demo findings just open the hub.
+    function learnMore() {
+      if (!realId || !API) { nav("learning"); return; }
+      setLearnLoading(true);
+      API.learning.forFinding(realId)
+        .then((res) => { nav("learning", (res && res.slug) || null); })
+        .catch(() => { nav("learning"); })
+        .finally(() => setLearnLoading(false));
     }
 
     // Persist "mark intentional" for real stub findings; demo stubs just toggle.
@@ -174,28 +148,8 @@
             h("div", { style: { display: "flex", gap: 8 } },
               h("button", { className: "btn btn-secondary btn-sm", onClick: (e) => { e.stopPropagation(); setCopied(true); toast({ kind: "success", msg: "Snippet copied" }); setTimeout(() => setCopied(false), 1400); } },
                 copied ? h(Icons.check, { size: 13 }) : h(Icons.copy, { size: 13 }), copied ? "Copied" : "Copy snippet"),
-              fixState === "idle" && h("button", { className: "btn btn-primary btn-sm", onClick: (e) => { e.stopPropagation(); genFix(); } },
-                h(Icons.sparkle, { size: 13 }), isStub ? "Generate Implementation" : "Generate Full Fix")),
-            // streaming fix
-            fixState !== "idle" && h("div", { className: "card", style: { marginTop: 10, padding: "12px 14px", background: "var(--bg-inset)" } },
-              h("div", { style: { display: "flex", alignItems: "center", gap: 7, marginBottom: 8 } },
-                fixState === "loading" ? h("div", { className: "spinner", style: { width: 13, height: 13 } }) : h(Icons.sparkle, { size: 14, style: { color: "var(--accent)" } }),
-                h("span", { style: { fontSize: 12, fontWeight: 600, color: fixState === "loading" ? "var(--text-2)" : "var(--accent)" } },
-                  fixState === "loading" ? (isStub ? "Generating implementation…" : "Generating full fix…") : (isStub ? "Implementation generated" : "Fix generated"))),
-              h("pre", { className: "mono", style: { fontSize: 11.5, lineHeight: 1.6, whiteSpace: "pre-wrap", color: "var(--text-1)" } },
-                fixText, fixState === "loading" && h("span", { className: "term-cursor" })),
-              fixState === "done" && h("div", { style: { display: "flex", gap: 8, marginTop: 10 } },
-                h("button", { className: "btn btn-primary btn-sm", onClick: () => {
-                  const blob = new Blob([fixText || ""], { type: "text/plain" });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  const safe = String(f.id || "finding").replace(/[^a-z0-9_-]+/gi, "-");
-                  a.href = url; a.download = safe + (isStub ? "-implementation.txt" : "-fix.patch");
-                  document.body.appendChild(a); a.click(); a.remove();
-                  setTimeout(() => URL.revokeObjectURL(url), 1000);
-                  toast({ kind: "success", msg: "Patch downloaded" });
-                } }, "Download patch"),
-                h("button", { className: "btn btn-ghost btn-sm", onClick: () => setFixState("idle") }, "Dismiss"))))),
+              h("button", { className: "btn btn-primary btn-sm", disabled: issueState === "loading", onClick: (e) => { e.stopPropagation(); createIssue(); } },
+                issueState === "loading" ? h("div", { className: "spinner", style: { width: 13, height: 13 } }) : h(Icons.github, { size: 13 }), issueState === "loading" ? "Creating…" : "Create issue")))),
 
         // Footer actions
         h("div", { style: { display: "flex", alignItems: "center", gap: 6, padding: "10px 18px", borderTop: "1px solid var(--border)", position: "relative", flexWrap: "wrap" } },
@@ -209,9 +163,8 @@
               h("div", { style: { display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" } },
                 h("button", { className: "btn btn-ghost btn-sm", onClick: () => setFpOpen(false) }, "Cancel"),
                 h("button", { className: "btn btn-primary btn-sm", onClick: () => { if (isStub) { markIntentional(); } else { suppress(); } } }, isStub ? "Mark intentional" : "Suppress")))),
-          h("button", { className: "btn btn-ghost btn-sm", onClick: (e) => { e.stopPropagation(); nav("learning"); } }, h(Icons.book, { size: 13 }), "Learn more"),
-          h("button", { className: "btn btn-ghost btn-sm", disabled: issueState === "loading", onClick: (e) => { e.stopPropagation(); createIssue(); } },
-            issueState === "loading" ? h("div", { className: "spinner", style: { width: 13, height: 13 } }) : h(Icons.github, { size: 13 }), issueState === "loading" ? "Creating…" : "Create issue"),
+          h("button", { className: "btn btn-ghost btn-sm", disabled: learnLoading, onClick: (e) => { e.stopPropagation(); learnMore(); } },
+            learnLoading ? h("div", { className: "spinner", style: { width: 13, height: 13 } }) : h(Icons.book, { size: 13 }), learnLoading ? "Opening…" : "Learn more"),
 
           h("span", { style: { flex: 1 } }),
           h("span", { className: "mono", style: { fontSize: 11, color: "var(--text-3)" } }, f.id, " · est. ", f.effort))));

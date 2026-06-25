@@ -6,14 +6,18 @@ fail the scan.
 """
 from __future__ import annotations
 
+import logging
+
 import httpx
 from sqlalchemy import select
 
 from app.core.database import SessionLocal
 from app.core.security import decrypt_secret
-from app.models.github import GitHubConnection
+from app.models.github import GitHubConnection, WebhookDelivery
 from app.models.scan import ENGINE_SECURITY, Finding, Scan
 from app.services import github_client as gh
+
+logger = logging.getLogger(__name__)
 
 _SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 
@@ -32,6 +36,15 @@ def _render_issue(finding: Finding, template: str) -> tuple[str, str]:
     except (KeyError, IndexError):
         body = f"{finding.public_id}: {finding.explanation or ''}"
     return title, body
+
+
+def _record(db, scan, event: str, status: int, detail: str) -> None:
+    """Log a post-scan GitHub action to the webhook-deliveries feed so the user
+    sees outcomes (and failures) in the Integrations UI, not just server logs."""
+    db.add(WebhookDelivery(
+        user_id=scan.user_id, event=event, status=status,
+        repo=scan.repo, detail=detail[:1000], triggered_scan_id=scan.id,
+    ))
 
 
 async def run_post_scan_github(scan_id: str) -> None:
@@ -57,7 +70,7 @@ async def run_post_scan_github(scan_id: str) -> None:
         sec = [f for f in findings if f.engine == ENGINE_SECURITY]
 
         await _maybe_create_issues(db, token, scan, sec, conn)
-        await _maybe_post_status(token, scan, sec, conn)
+        await _maybe_post_status(db, token, scan, sec, conn)
         await db.commit()
 
 
@@ -70,6 +83,9 @@ async def _maybe_create_issues(db, token, scan, sec_findings, conn) -> None:
     base_labels = list(s.get("labels", []))
     mapping = s.get("label_mapping") or {}
 
+    created = 0
+    failed = 0
+    last_error = ""
     for f in sec_findings:
         if f.github_issue_url:  # already filed
             continue
@@ -82,11 +98,27 @@ async def _maybe_create_issues(db, token, scan, sec_findings, conn) -> None:
                 token, scan.repo, title, body, labels=labels, assignee=s.get("assignee")
             )
             f.github_issue_url = issue.get("html_url")
-        except httpx.HTTPError:
-            continue  # don't fail the scan over one issue
+            created += 1
+        except httpx.HTTPError as exc:
+            # Don't fail the scan over one issue, but make the failure visible —
+            # a silent no-op here is what makes "auto-create issues" look broken
+            # (usually a missing token scope or a 403/422 from GitHub).
+            failed += 1
+            last_error = str(exc)
+            logger.warning(
+                "auto-create issue failed for %s in %s: %s",
+                f.public_id, scan.repo, exc,
+            )
+            continue
+
+    if failed:
+        _record(db, scan, "issues", 502,
+                f"Created {created} issue(s); {failed} failed — {last_error}")
+    elif created:
+        _record(db, scan, "issues", 200, f"Created {created} GitHub issue(s)")
 
 
-async def _maybe_post_status(token, scan, sec_findings, conn) -> None:
+async def _maybe_post_status(db, token, scan, sec_findings, conn) -> None:
     sc = conn.status_check or {}
     if not sc.get("post_commit_status") or not scan.commit:
         return
@@ -103,5 +135,10 @@ async def _maybe_post_status(token, scan, sec_findings, conn) -> None:
             token, scan.repo, scan.commit, state,
             sc.get("check_name", "Akira AI security check"), desc,
         )
-    except httpx.HTTPError:
-        pass
+        _record(db, scan, "status", 200, f"Commit status posted: {state} — {desc}")
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "post commit status failed for %s @ %s: %s",
+            scan.repo, scan.commit, exc,
+        )
+        _record(db, scan, "status", 502, f"Commit status failed — {exc}")

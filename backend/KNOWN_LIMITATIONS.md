@@ -18,6 +18,10 @@ environmental (needs an account/key) or a deliberate, low-risk choice.
     scans/chat. Unset -> that provider is unavailable and scans fall back to the
     empty-result placeholder (a deploy misconfig, not a user state).
   - `GITHUB_CLIENT_ID`/`SECRET` — OAuth; without them `/github/authorize` 503s.
+  - `GOOGLE_CLIENT_ID`/`SECRET` — "Sign in with Google"; without them
+    `/auth/google/start` 503s (clear `google_not_configured` error, surfaced in
+    the auth screen). Register `google_login_redirect_uri` as an authorized
+    redirect on the Google OAuth app.
   - `TAVILY_KEY` (or `SERPAPI_KEY`) — live custom-vuln web research.
   - `MAILERSEND_API_KEY` or `SMTP_*` — real email; else logged to an outbox.
   - `MCP_API_KEY` — require bearer auth on `/mcp`.
@@ -101,6 +105,69 @@ to the live API is underway, **foundation-first**:
   placeholder token client-side) — wiring it to `POST
   /audits/{id}/handoff/generate` is the remaining step, consistent with the rest
   of the still-mock frontend.
+- ✅ **GitHub `ignore_paths` is now honored.** The setting was stored and editable
+  in the UI but never consumed — files the user excluded (e.g. `dist/**`,
+  `*.test.js`) were still analyzed. `run_scan` now passes the connection's
+  `ignore_paths` globs into `walk_source(ignore_globs=…)` for github scans
+  (`_ignore_globs_for_scan`); non-github scans are unaffected. Covered by
+  `test_ignore_globs_exclude_matching_files`.
+- ✅ **Post-scan GitHub failures are no longer silent.** `_maybe_create_issues` /
+  `_maybe_post_status` swallowed `httpx.HTTPError` with a bare `pass`/`continue`,
+  so a missing token scope or a 403/422 made "auto-create issues" / "commit
+  status" look broken with zero signal. They now log a warning with the finding /
+  commit / repo so failures are diagnosable. They are **also recorded as
+  `WebhookDelivery` rows** (`event` = `issues`/`status`, `status` 200 or 502 with
+  the error in `detail`), so the Integrations → "Recent deliveries" feed now shows
+  post-scan issue/status outcomes and failures — not just inbound webhooks. The
+  frontend renders the `detail` line (red on failure). Still best-effort (never
+  fails the scan). Covered by `test_post_scan_records_issue_failure_in_deliveries`.
+- ✅ **Learning Hub: "Learn more" deep-links + auto-grows with scans.** Previously
+  "Learn more" on a finding just dumped you at the hub root, and the hub was a
+  fixed seeded set. Now: `GET /learning-hub/for-finding/{id}` resolves a finding
+  to its class **by category** (reliable because every category is guaranteed a
+  class) and generates one on the fly if the category is novel — LLM content with
+  a templated seed fallback, idempotent by slug (`learning_autogen.py`). The
+  orchestrator calls `ensure_classes_for_scan` after every scan so new vuln types
+  grow the hub. Frontend: "Learn more" hits the resolver then deep-links via
+  `nav("learning", slug)` → `LearningPage({initialSlug})`. (Reverses the earlier
+  decision to drop `/for-finding` — that resolver was brittle because it matched
+  free-text against *static* names; category-keyed + autogen fixes the root cause.)
+- ✅ **Learning Hub directory rebuilt to avoid endless scroll (tribrid).** Top
+  level is now category cards with counts → drill into one category → its classes,
+  capped with a "Show N more" load-more (24 at a time). Search flattens to a
+  cross-category result list. Scales to hundreds of auto-generated classes.
+  Covered by resolver/autogen tests in `test_learning.py`.
+- ✅ **Hub dedup hardened (no per-scan category spam).** Resolution checks, in
+  order: existing CWE id (canonical — variant wordings of the same CWE converge
+  to one class), then exact category/name match; only a genuinely new label
+  creates a class, and `slug` is unique (DB constraint) so even that can't dup.
+  A normal scan reuses seeded classes and creates **zero**. Deliberately avoided
+  fuzzy name/alias matching — seed names are descriptive ("SSRF via
+  User-Controlled URLs"), so concept-string matching risked *wrong* merges; CWE
+  is the safe canonical key. Verified: DB had 202 classes, 0 duplicate names.
+  Covered by `test_cwe_dedup_converges_variant_wordings`.
+- ✅ **Social auth: Google added alongside GitHub.** "Sign in with Google" now
+  fully wired (`app/services/google_client.py`, `/auth/google/start` +
+  `/auth/google/callback` mirroring the GitHub login flow; shared
+  `_find_or_create_oauth_user`). Frontend Google button calls
+  `API.auth.googleStart()` (was a "coming soon" stub). Both providers redirect
+  back with tokens in the URL fragment, consumed by the existing
+  `consumeAuthRedirect`. Needs `GOOGLE_CLIENT_ID`/`SECRET` (see top).
+- ✅ **Password show/hide toggle** added to the auth screen `Field` (eye icon,
+  toggles `type` password↔text; `tabIndex=-1` so it's skipped in tab order).
+- ✅ **Report gauges no longer mislead on non-completed scans.** A cancelled/
+  failed scan has `security_score = NULL` → `100 - (None or 0) = 100`, so the
+  overview showed **SECURITY RISK 100 / OPT 0 / COMPLETENESS 0** as if it were
+  real. The gauge guard in chat.jsx now covers `running`/`queued`/`claimed`
+  (spinner + "still running" banner) as well as `cancelled`/`failed`, instead of
+  rendering fake 0s. Root-cause of the "stuck running" report was a **stale
+  backend process not running orphan recovery** — restarting (maintenance loop
+  polls 5s, reaps `running` >15min) self-heals it. See memory note on backend
+  restart / cache-bump gotchas.
+- 🟢 **"Block PR merge on Critical" depends on GitHub branch protection.** Akira
+  sets the commit status to `failure` on criticals, but that only blocks a merge
+  if the repo requires that check via branch protection — Akira can't enforce it
+  alone. The UI notes this ("Requires branch protection on the repo").
 
 ## Stub & Placeholder Detection engine (this session)
 
@@ -139,6 +206,83 @@ to the live API is underway, **foundation-first**:
 
 ## Detection robustness pass (this session)
 
+- ✅ **Taxonomy expanded to 27 categories + an attack-chain catalog (workstream 1
+  of 3).** Added 7 conventional categories (Containers & Orchestration, IaC, CI/CD
+  & Build Security, Supply Chain Integrity, AI/LLM Application Security, Privacy &
+  Compliance, Protocol & Network) — now 251 classes — plus a separate `ATTACK_CHAINS`
+  catalog (12 curated real-hack combinations, e.g. SSRF→metadata→cred-theft,
+  deserialization→RCE→lateral). Chains seed a new Learning Hub category. `CATEGORIES`
+  in `taxonomy.py` now derives from `TAXONOMY` keys (no more hand-maintained
+  duplicate that could drift from the prompt). **Still TODO:** workstream 2 — a
+  post-scan correlation pass (`attack_chains` service) that detects these chains
+  across a scan's findings (hybrid: curated priors + LLM free-form) and emits an
+  `AttackPath` artifact (needs model + Alembic migration); workstream 3 — an
+  "Attack Paths" report tab. The catalog's `steps`/`real_world`/`impact` fields are
+  shaped for the correlation prompt, so they're ready to consume.
+- ✅ **Attack-chain correlation engine (workstream 2 of 3).** New
+  `app.services.attack_chains.correlate_attack_chains`, hooked into
+  `orchestrator._finalize` after all findings exist. Hybrid detection: (1)
+  deterministic catalog match — a curated chain fires when ≥2 of its steps match
+  findings (acronym/substring/token-overlap matching, security findings only);
+  (2) LLM free-form pass proposes novel chains, validated to reference only real
+  finding `public_id`s and de-duped against catalog (subset chains dropped).
+  Persisted as `AttackPath` rows (CHN-XXXX, new table + migration
+  c1e7a9b3f5d8, CASCADE on scan delete) and served at
+  `GET /scans/{id}/attack-paths`. Best-effort: never raises into the pipeline;
+  idempotent per scan.
+- ✅ **"Attack Paths" report tab (workstream 3 of 3 — feature complete).** New
+  `AttackPathsTab` in `report-tabs.jsx`, wired into `page-report.jsx` between
+  Stubs and Dependencies, consuming `GET /scans/{id}/attack-paths` via
+  `API.scans.attackPaths`. Each chain renders as a card: severity badge,
+  catalog-vs-detected tag, the constituent findings as clickable chips joined by
+  arrows (click → Vulnerabilities tab focused on that finding's file), numbered
+  attacker steps, and Impact / Seen-in-the-wild / Break-the-chain rows, plus a
+  "Learn about this attack" button deep-linking to the chain's Hub class
+  (`learn_slug`). Real/empty/loading/error states mirror the other tabs. Required
+  exposing `public_id` on the normalized finding shape (`normalizeFinding`) so a
+  chain step resolves to a finding. Cache-buster bumped v=61→v=62.
+- ✅ **Attack-chain matcher hardened after a live scan (verified end-to-end).** A
+  real Gemini scan of a planted vuln app produced 9 correct findings but 0
+  chains: the catalog matcher compared chain steps to finding labels too
+  literally, so model rewordings missed ("Server Side Request Forgery (SSRF)" ≠
+  "SSRF via User-Controlled URLs", "Hardcoded Credentials" ≠ "Hardcoded API
+  Keys", "Missing Access Control" ≠ "IDOR"). Fixed with a concept-synonym layer
+  in `_matches` (shared concept group OR acronym OR substring OR token overlap) —
+  concept-first widens recall without false-merging. Re-correlation on the same
+  findings then yielded **4 paths: 3 catalog + 1 novel LLM-discovered**
+  (SQLi→Auth Bypass→User Data Dump), confirming both branches work against a live
+  model. Also fixed `_loads_lenient` (strict=False + fence-stripping + first-{...}
+  fallback) — the model returned JSON with a raw newline in a string that strict
+  `json.loads` rejected, dropping the whole LLM batch. Regression tests added.
+  Note: SQLite single-writer means a running dev uvicorn server locks `akira.db`
+  against a concurrent CLI scan ("database is locked"); use a DB copy or stop the
+  server when driving scans from a script.
+- ✅ **Attack-chain catalog scaled 12 → 56, re-keyed on CWE, tiered detection.**
+  Curated catalog grew to 56 real-world chains across 11 families (cloud/IAM,
+  container/k8s, injection→RCE, auth/session, OAuth, XSS/client, file/upload,
+  supply-chain/CI, AI/LLM, protocol/desync, business-logic/race, crypto,
+  logging, DoS, mobile). Steps are now CWE-keyed (`_s(label, *cwes)`) — matching
+  is primarily by CWE (97% of findings carry one), wording-independent, with text/
+  concept as fallback. Tiered output: `confirmed` (entry point + all matched links
+  STRONG, ≥2 of them) vs `potential` (partial path). New `attack_paths.tier`
+  column (migration d2f8b4a6e1c9). Precision guards added after a real scan showed
+  false positives: (1) generic CWEs (200/522/798/732…) only WEAK-match, never
+  confirm alone; (2) the entry-point step must STRONG-match or the chain doesn't
+  fire; (3) narrowed the over-broad "secret/credential" concept group; (4) fixed
+  an acronym-matching bug that uppercased whole strings, making every word a fake
+  acronym ("DATA" matching "DATA"). Verified end-to-end: a 3-isolated-finding scan
+  now yields 0 chains (was 4 false positives); the 9-finding vuln app yields clean
+  confirmed chains. Frontend shows a "Potential" badge; chat gets the tier too.
+- ✅ **Report chat is now attack-path aware.** `build_system_prompt` takes an
+  optional `attack_paths` list and injects a serialized chain block (id, name,
+  severity, constituent finding ids, steps, impact, real_world, remediation) plus
+  a rule telling the model to use it when asked how findings relate / can be
+  chained / worst-case attack — explicitly framed as on-topic remediation, not
+  exploit generation (still refuses payload requests). `api/chat.py` loads the
+  paths alongside findings and passes them through. No frontend change (context is
+  server-built). Back-compat: the arg defaults to None. Stale assertion in
+  `test_scoped_chat` updated (the working tree had already reworded the prompt
+  header "RULES — ABSOLUTE, NO EXCEPTIONS:" → "RULES:" vs committed HEAD).
 - ✅ **All 20 security categories now sent every scan.** `slice_taxonomy` used to
   filter to a 5-category base + filename/path heuristics, which (a) gave bland
   filenames only the base set and (b) left several categories — Concurrency,

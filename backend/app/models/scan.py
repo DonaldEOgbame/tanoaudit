@@ -62,6 +62,11 @@ class Scan(Base):
         ForeignKey("repositories.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
+    # User-set display name (overrides the derived repo label in lists) and a
+    # pin flag that floats the scan to the top of the sidebar/reports.
+    display_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    pinned: Mapped[bool] = mapped_column(default=False)
+
     # --- Source ---
     source_type: Mapped[str] = mapped_column(String(16))  # github | url | zip
     repo: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)

@@ -28,7 +28,7 @@ from app.core.errors import bad_request, envelope, not_found
 from app.core.ratelimit import rate_limit
 from app.models.scan import Finding, Scan
 from app.models.user import User
-from app.schemas.scan import FindingOut, ScanCreate, ScanOut
+from app.schemas.scan import FindingOut, ScanCreate, ScanOut, ScanUpdate
 from app.services import ingestion, model_catalog, scan_events as ev
 from app.services.orchestrator import run_scan
 from app.services.usage import daily_scan_status, enforce_daily_scan_limit
@@ -154,7 +154,7 @@ async def list_scans(
         await db.execute(
             select(Scan)
             .where(Scan.user_id == user.id)
-            .order_by(Scan.created_at.desc())
+            .order_by(Scan.pinned.desc(), Scan.created_at.desc())
             .limit(limit)
             .offset(offset)
         )
@@ -181,6 +181,30 @@ async def get_scan(
     db: AsyncSession = Depends(get_db),
 ):
     scan = await _owned_scan(db, scan_id, user.id)
+    return envelope(ScanOut.model_validate(scan).model_dump())
+
+
+@router.patch("/{scan_id}")
+async def update_scan(
+    scan_id: str,
+    body: ScanUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Rename a scan (display_name) and/or pin/unpin it.
+
+    Only the fields present in the request body are applied; an empty/whitespace
+    display_name clears the override and falls back to the derived repo label.
+    """
+    scan = await _owned_scan(db, scan_id, user.id)
+    data = body.model_dump(exclude_unset=True)
+    if "display_name" in data:
+        name = (data["display_name"] or "").strip()
+        scan.display_name = name or None
+    if "pinned" in data and data["pinned"] is not None:
+        scan.pinned = bool(data["pinned"])
+    await db.commit()
+    await db.refresh(scan)
     return envelope(ScanOut.model_validate(scan).model_dump())
 
 
@@ -278,6 +302,27 @@ async def list_findings(
         stmt = stmt.where(Finding.status == status)
     rows = (await db.execute(stmt)).scalars().all()
     return envelope([FindingOut.model_validate(f).model_dump() for f in rows])
+
+
+@router.get("/{scan_id}/attack-paths")
+async def list_attack_paths(
+    scan_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Detected attack chains for a scan: vulnerability combinations that form a
+    real exploitation path, each linking its constituent findings by public id."""
+    from app.models.attack_path import AttackPath
+
+    await _owned_scan(db, scan_id, user.id)
+    rows = (
+        await db.execute(
+            select(AttackPath)
+            .where(AttackPath.scan_id == scan_id)
+            .order_by(AttackPath.public_id)
+        )
+    ).scalars().all()
+    return envelope([p.as_dict() for p in rows])
 
 
 @router.get("/{scan_id}/dependencies")

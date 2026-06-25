@@ -249,6 +249,11 @@
       if (data && data.authorize_url) window.location.assign(data.authorize_url);
       return data;
     },
+    async googleStart() {
+      const data = await get("/auth/google/start", { auth: false });
+      if (data && data.authorize_url) window.location.assign(data.authorize_url);
+      return data;
+    },
     // Pick up tokens the backend put in the URL fragment after GitHub sign-in.
     // Returns true if a session was established. Also surfaces ?auth=error.
     consumeAuthRedirect() {
@@ -299,6 +304,10 @@
     // Rolling-24h scan usage vs cap: { used, limit, remaining, resets_in_seconds }.
     limit() { return get("/scans/limit"); },
     get(id) { return get("/scans/" + id); },
+    // Rename and/or pin: patch accepts { display_name?, pinned? }.
+    update(id, patch_) { return patch("/scans/" + id, patch_); },
+    rename(id, name) { return patch("/scans/" + id, { display_name: name }); },
+    setPinned(id, pinned) { return patch("/scans/" + id, { pinned: !!pinned }); },
     remove(id) { return del("/scans/" + id); },
     findings(id, params) {
       const q = new URLSearchParams(params || {}).toString();
@@ -308,6 +317,8 @@
     dependencies(id) { return get("/scans/" + id + "/dependencies"); },
     // AI-generation composition derived from real findings.
     aigen(id) { return get("/scans/" + id + "/ai-generation"); },
+    // Detected attack chains (vulnerability combinations): array of AttackPath dicts.
+    attackPaths(id) { return get("/scans/" + id + "/attack-paths"); },
     control(id, command) {
       return post("/scans/" + id + "/control?command=" + encodeURIComponent(command));
     },
@@ -378,8 +389,10 @@
     // SSE stream: onEvent receives { delta } chunks then { done: true }.
     // Returns { promise, abort() }. Mirrors findings.generateFix.
     // `tier` is an optional Akira model tier id (from scans.models()).
-    send(scanId, message, messages, onEvent, tier) {
-      return stream("/scans/" + scanId + "/chat", { message, messages: messages || [], tier: tier || null }, onEvent);
+    send(scanId, message, messages, onEvent, tier, attackPathsContext) {
+      const body = { message, messages: messages || [], tier: tier || null };
+      if (attackPathsContext) body.attack_paths_context = attackPathsContext;
+      return stream("/scans/" + scanId + "/chat", body, onEvent);
     },
   };
 
@@ -437,6 +450,7 @@
     categories() { return get("/learning-hub/categories"); },
     classes(params) { return get("/learning-hub/classes" + qs(params)); }, // ?category= &q=
     classDetail(slug) { return get("/learning-hub/classes/" + encodeURIComponent(slug)); },
+    forFinding(findingId) { return get("/learning-hub/for-finding/" + encodeURIComponent(findingId)); },
   };
 
   // --- notifications --------------------------------------------------------

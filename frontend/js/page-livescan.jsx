@@ -62,6 +62,37 @@
       setTimeout(() => onComplete && onComplete(summary), 1000);
     }
 
+    // Reconcile the live screen against the scan's real DB status. Used by the
+    // fallback poll and by the WS close/error handlers so a dropped connection
+    // never surfaces a false failure (or strands the bar) while the scan is still
+    // running. Resolves to the terminal outcome when there is one; otherwise calls
+    // onUnresolved (still running / unknown) so the caller can decide what to do.
+    function reconcile(onUnresolved) {
+      if (!scanId || !window.AkiraAPI) { if (onUnresolved) onUnresolved(); return; }
+      window.AkiraAPI.scans.get(scanId)
+        .then((scan) => {
+          if (terminatedRef.current || completingRef.current) return;
+          if (!scan) { if (onUnresolved) onUnresolved(); return; }
+          if (scan.status === "completed") {
+            terminatedRef.current = true;
+            finish({
+              security_score: scan.security_score,
+              optimization_score: scan.optimization_score,
+              segments_unparsed: scan.segments_unparsed,
+              report_id: scanId,
+            });
+          } else if (scan.status === "failed") {
+            terminatedRef.current = true;
+            if (onError) onError(scan.error || "The scan did not complete.");
+          } else if (scan.status === "cancelled") {
+            terminatedRef.current = true;
+          } else if (onUnresolved) {
+            onUnresolved();
+          }
+        })
+        .catch(() => { if (onUnresolved) onUnresolved(); });
+    }
+
     // --- Live mode: drive everything from the backend WebSocket. ---
     useEffect(() => {
       if (!scanId || !window.AkiraAPI) return undefined;
@@ -93,17 +124,38 @@
           }
         },
         onError() {
-          // A transport error before any terminal event surfaces as a scan error.
-          if (!terminatedRef.current && !completingRef.current && onError) onError("Lost connection to the scan.");
+          // A transport error before any terminal event might just be a dropped
+          // socket on a still-running scan. Check the real status before failing;
+          // if it's genuinely still running, stay put — the fallback poll carries on.
+          if (terminatedRef.current || completingRef.current) return;
+          reconcile(() => { if (onError) onError("Lost connection to the scan."); });
         },
         onClose() {
-          // The server closes the socket right after a terminal event. If it
-          // closed without one (e.g. backend died mid-scan), surface that.
-          if (!terminatedRef.current && !completingRef.current && onError) onError("The scan connection closed unexpectedly.");
+          // The server closes the socket right after a terminal event, but a proxy
+          // idle-timeout or half-open socket can also close it mid-scan. Only treat
+          // it as a failure if the scan isn't actually still running/finished.
+          if (terminatedRef.current || completingRef.current) return;
+          reconcile(() => { if (onError) onError("The scan connection closed unexpectedly."); });
         },
       });
       wsRef.current = conn;
       return () => conn.close();
+    }, [scanId]);
+
+    // --- Fallback poll: self-heal if the WS misses the terminal event. ---
+    // The live screen otherwise depends entirely on a single scan_completed /
+    // scan_failed WS event. If that event is dropped (a transient disconnect, a
+    // half-open socket during the silent verification/finalize tail, a proxy idle
+    // timeout) the bar strands at 99% forever even though the scan finished — the
+    // user has to refresh. Polling the scan's real DB status reconciles that the
+    // same way a refresh does, so the UI always reaches its terminal state.
+    useEffect(() => {
+      if (!scanId || !window.AkiraAPI) return undefined;
+      const iv = setInterval(() => {
+        if (terminatedRef.current || completingRef.current) return;
+        reconcile(null); // unresolved (still running) is fine — just wait for the next tick
+      }, 5000);
+      return () => clearInterval(iv);
     }, [scanId]);
 
     // --- Demo mode: timed simulation when there's no real scan. ---

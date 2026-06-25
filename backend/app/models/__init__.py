@@ -1,5 +1,6 @@
 """Model registry. Import every model here so Base.metadata sees them."""
 from app.models.api_key import ApiKey  # noqa: F401
+from app.models.attack_path import AttackPath  # noqa: F401
 from app.models.chat import ChatLog  # noqa: F401
 from app.models.custom_vuln import CustomVulnerability  # noqa: F401
 from app.models.dependency import ScanDependency  # noqa: F401
@@ -37,5 +38,5 @@ __all__ = [
     "GitHubConnection", "WebhookDelivery",
     "HandoffToken", "HandoffEvent", "LearningHubClass",
     "Notification", "UsageLog", "FunFact", "EmailOtp",
-    "ScanDependency",
+    "ScanDependency", "AttackPath",
 ]

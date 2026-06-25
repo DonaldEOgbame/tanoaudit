@@ -9,7 +9,13 @@ from __future__ import annotations
 import re
 from urllib.parse import quote_plus
 
-from app.services.taxonomy_data import TAXONOMY
+from app.services.taxonomy_data import (
+    ATTACK_CHAIN_CATEGORY,
+    ATTACK_CHAINS,
+    TAXONOMY,
+    attack_chain_classes,
+    chain_step_labels,
+)
 
 
 def slugify(category: str, name: str) -> str:
@@ -40,6 +46,14 @@ CATEGORY_CONTEXT: dict[str, str] = {
     "Mobile & Cross-Platform": "how mobile apps store data, expose components, and talk to other apps and servers",
     "WebSocket & Real-Time": "how long-lived, bidirectional connections are authenticated and bounded",
     "Third-Party Integration & Webhooks": "how the application trusts and calls out to external services and receives their callbacks",
+    "Containers & Orchestration": "how container images and Kubernetes workloads are built, privileged, and isolated",
+    "Infrastructure as Code": "how cloud infrastructure is declared in Terraform/CloudFormation and what defaults it ships",
+    "CI/CD & Build Security": "how the build and deployment pipeline handles secrets, untrusted input, and its own privileges",
+    "Supply Chain Integrity": "the integrity and provenance of the dependencies and artifacts your build consumes and produces",
+    "AI/LLM Application Security": "how the application builds prompts, handles model output, and bounds an AI agent's tools and cost",
+    "Privacy & Compliance": "how personal data is collected, retained, shared, and made auditable and erasable",
+    "Protocol & Network": "how HTTP, caching, DNS, email, and RPC protocols are parsed and trusted between hops",
+    ATTACK_CHAIN_CATEGORY: "how several individually-fixable weaknesses combine into a single real-world attack path",
 }
 
 # PortSwigger Web Security Academy topic mapping for classes that have one.
@@ -249,7 +263,71 @@ def build_classes() -> list[dict]:
                 "faq": _faq(name, category, cwe, owasp, severity),
                 "resources": _build_resources(name, category, cwe, owasp),
             })
+    # Attack chains: vulnerability combinations that form real hacks.
+    for name, cwe, owasp, severity in attack_chain_classes():
+        out.append({
+            "slug": slugify(ATTACK_CHAIN_CATEGORY, name),
+            "name": name,
+            "category": ATTACK_CHAIN_CATEGORY,
+            "severity": severity,
+            "cwe": cwe,
+            "owasp": owasp,
+            "summary": _chain_summary(name),
+            "faq": _chain_faq(name),
+            "resources": _build_resources(name, ATTACK_CHAIN_CATEGORY, cwe, owasp),
+        })
+
     # Non-security engines: optimization + stub/placeholder content.
     from app.services.learning_seed_nonsec import build_nonsecurity_classes
     out.extend(build_nonsecurity_classes())
     return out
+
+
+def _chain_summary(name: str) -> str:
+    c = ATTACK_CHAINS[name]
+    steps = chain_step_labels(c)
+    return (
+        f"{name} is an attack chain: {' then '.join(steps)}. "
+        f"On its own each step is fixable, but combined they let an attacker {c['impact'].lower()}"
+    )
+
+
+def _chain_faq(name: str) -> list[dict]:
+    c = ATTACK_CHAINS[name]
+    steps = chain_step_labels(c)
+    return [
+        {
+            "question": f"What is the {name} attack chain?",
+            "answer": (
+                f"It's a real-world exploitation path built from {len(steps)} weaknesses chained "
+                f"in order: {', then '.join(steps)}. The danger isn't any single bug — it's how they "
+                f"compose. The end result: {c['impact'].lower()}"
+            ),
+            "advanced": f"Representative CWE for the terminal step: {c['cwe']}.",
+        },
+        {
+            "question": "Has this happened in the real world?",
+            "answer": c["real_world"],
+        },
+        {
+            "question": "Why do individual fixes miss it?",
+            "answer": (
+                "Each weakness in the chain may look low-risk in isolation and get deprioritised, "
+                "so reviewers triage them separately and never see the combined path. Attackers, by "
+                "contrast, look for exactly these compositions."
+            ),
+        },
+        {
+            "question": "How do I break the chain?",
+            "answer": (
+                "You only need to remove one link to stop the full attack, but fix as many as you can: "
+                f"address {steps[0].lower()} first (the entry point), then ensure the escalation steps "
+                f"({', '.join(steps[1:]) or 'the follow-on weaknesses'}) can't be reached. Defence in "
+                "depth means even if one link returns, the chain stays broken."
+            ),
+            "advanced": (
+                "Akira flags the constituent findings individually and links them into this path so you "
+                "can see the whole chain, not just isolated dots."
+            ),
+        },
+    ]

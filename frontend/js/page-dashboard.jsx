@@ -338,7 +338,7 @@
         h("h1", { style: { fontSize: 30, fontWeight: 750, letterSpacing: "-0.025em", marginTop: 18 } },
           firstName && firstName !== "there" ? ("Welcome, " + firstName) : "Welcome to Akira AI"),
         h("p", { style: { color: "var(--text-2)", fontSize: 15, maxWidth: 520, margin: "8px auto 0", textWrap: "pretty" } },
-          "One scan, two engines — find ", h("strong", { style: { color: "var(--text-1)" } }, "187 vulnerability classes"),
+          "One scan, two engines — find ", h("strong", { style: { color: "var(--text-1)" } }, "300+ vulnerability classes"),
           " and optimize performance, quality and scale at the same time."),
       ),
 

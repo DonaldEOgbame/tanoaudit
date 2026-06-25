@@ -99,15 +99,16 @@ class Settings(BaseSettings):
     # Concrete model id backing each user-facing Akira tier (see
     # services/model_catalog.py). Env-overridable so a tier's backend can change
     # without touching stored tier ids or the UI. The vendor for each tier is
-    # fixed in the catalog (fast=gemini, balanced/deep=openrouter).
-    tier_fast_model: str = "gemini-flash-latest"
-    tier_balanced_model: str = "anthropic/claude-3.5-haiku"
-    tier_deep_model: str = "anthropic/claude-3.7-sonnet"
+    # all on the openrouter provider; Gemini is kept only as an auto fallback).
+    # The three tiers differ by segment-coverage cap, not by model.
+    tier_fast_model: str = "openai/gpt-oss-120b:free"
+    tier_balanced_model: str = "openai/gpt-oss-120b:free"
+    tier_deep_model: str = "openai/gpt-oss-120b:free"
 
     # Per-provider default model ids (used when no tier model is given, e.g. the
     # llm_clients defaults). Kept in sync with the fast/balanced tiers.
     gemini_model: str = "gemini-flash-latest"
-    openrouter_model: str = "anthropic/claude-3.5-haiku"
+    openrouter_model: str = "openai/gpt-oss-120b:free"
 
     # Hard daily cap on scans per user (rolling 24h). At the cap, scan-create
     # returns 429 with the seconds until the oldest counted scan ages out.
@@ -126,7 +127,13 @@ class Settings(BaseSettings):
     # Separate callback for "Sign in with GitHub" (authentication, not the
     # account-linking flow above). Must be registered as a valid callback URL on
     # the GitHub OAuth app alongside github_oauth_redirect_uri.
-    github_login_redirect_uri: str = "http://localhost:8000/api/v1/auth/github/callback"
+    github_login_redirect_uri: str = "http://localhost:8000/api/v1/github/callback"
+
+    # Google OAuth (Sign in with Google). Without these, the Google sign-in
+    # endpoints return a clear "not configured" error; everything else runs fine.
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_login_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
 
     # Optional web-search provider(s) for custom-vuln research.
     # Tavily is the default (AI-focused, 1k free credits/mo); SerpAPI is a

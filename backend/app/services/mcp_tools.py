@@ -88,13 +88,14 @@ async def tool_fetch_audit_handoff(args: dict) -> str:
         if scan is None:
             return "Error: Invalid or expired handoff link."
         findings = await ho.select_findings(db, audit_id, valid.scope, valid.finding_ids)
+        attack_paths = await ho.select_attack_paths(db, audit_id, findings)
         valid.used_at = utcnow()
         db.add(HandoffEvent(
             user_id=valid.user_id, audit_id=audit_id, kind=EVT_CONSUMED,
             detail={"via": "mcp", "finding_count": len(findings)},
         ))
         await db.commit()
-        return ho.render_handoff_markdown(scan, findings)
+        return ho.render_handoff_markdown(scan, findings, attack_paths)
 
 
 async def _finding_covered_by_handoff(db, audit_id: str, finding: Finding) -> HandoffToken | None:

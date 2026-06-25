@@ -6,7 +6,7 @@
   const Icons = window.Icons;
   const {
     Sidebar, CommandPalette, Dashboard, NewScanModal, LiveScan, ScanReport,
-    CustomVulnsPage, PlansPage, WatchlistPage, ReportsPage, LearningPage,
+    CustomVulnsPage, PlansPage, WatchlistPage, LearningPage,
     IntegrationsPage, SettingsModal, ToastProvider, useToast,
   } = window;
 
@@ -44,6 +44,7 @@
     const [t, setTweak] = window.useTweaks(TWEAK_DEFAULTS);
     const [page, setPage] = useState("dashboard");
     const [pageKey, setPageKey] = useState(0);
+    const [learnSlug, setLearnSlug] = useState(null);  // deep-link target for the Learning Hub
     const [scanModal, setScanModal] = useState(false);
     const [scanning, setScanning] = useState(false);
     const [scanRepo, setScanRepo] = useState("user/ecommerce-api");
@@ -114,6 +115,8 @@
     function nav(p, targetScanId) {
       if (p === "report" && targetScanId) { setScanId(targetScanId); setJustScanned(false); }
       else if (p !== "report") { setJustScanned(false); }
+      // nav("learning", slug) deep-links to a specific class.
+      if (p === "learning") setLearnSlug(targetScanId || null);
       setPage(p); setPageKey((k) => k + 1);
     }
 
@@ -178,15 +181,14 @@
       case "scans":
       case "report": body = h(ScanReport, { nav, toast, justScanned, scanId, repo: scanId ? scanRepo : null, onLoadRepo: setScanRepo }); break;
       case "watchlist": body = h(WatchlistPage, { toast, nav }); break;
-      case "reports": body = h(ReportsPage, { toast, nav }); break;
       case "custom": body = h(CustomVulnsPage, { toast }); break;
       case "plans": body = h(PlansPage, { toast }); break;
       case "integrations": body = h(IntegrationsPage, { toast }); break;
-      case "learning": body = h(LearningPage, null); break;
+      case "learning": body = h(LearningPage, { initialSlug: learnSlug }); break;
       default: body = h(Dashboard, { demoState, nav, user, onNewScan: () => setScanModal(true), onSample: () => nav("report") });
     }
 
-    const titles = { dashboard: "Dashboard", scans: "Scans", report: "Scan Report", watchlist: "Watchlist", reports: "Reports", custom: "Custom Vulnerabilities", plans: "Optimization Plans", integrations: "Integrations", learning: "Learning Hub" };
+    const titles = { dashboard: "Dashboard", scans: "Scans", report: "Scan Report", watchlist: "Watchlist", custom: "Custom Vulnerabilities", plans: "Optimization Plans", integrations: "Integrations", learning: "Learning Hub" };
 
     return h("div", { className: "vs-app" },
       h(Sidebar, { page, nav, collapsed, setCollapsed, onNewScan: () => setScanModal(true), onCmd: () => setCmdOpen(true), openSettings: (s) => setSettings(s || "general"), demoState, user, onLogout }),

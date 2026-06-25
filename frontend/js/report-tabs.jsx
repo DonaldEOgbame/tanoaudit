@@ -218,6 +218,123 @@
   }
   window.DepsTab = DepsTab;
 
+  // ============ ATTACK PATHS ============
+  // Detected vulnerability *combinations* that form real exploitation chains
+  // (e.g. SSRF → cloud metadata → credential theft). Backend:
+  // GET /scans/{id}/attack-paths (app.services.attack_chains correlation pass).
+  // Each path links its constituent findings by public id; clicking one jumps to
+  // the Vulnerabilities tab focused on that finding's file.
+  function AttackPathsTab({ meta, findings, setTab, setSelFile, nav }) {
+    const API = window.AkiraAPI;
+    const scanId = meta && meta.id;
+    const [state, setState] = useState({ loading: !!(scanId && API), error: null, paths: null });
+    useEffect(() => {
+      if (!scanId || !API) { setState({ loading: false, error: null, paths: null }); return; }
+      let alive = true;
+      setState({ loading: true, error: null, paths: null });
+      API.scans.attackPaths(scanId)
+        .then((rows) => { if (alive) setState({ loading: false, error: null, paths: Array.isArray(rows) ? rows : [] }); })
+        .catch((e) => { if (alive) setState({ loading: false, error: (e && e.message) || "Failed to load attack paths", paths: null }); });
+      return () => { alive = false; };
+    }, [scanId]);
+
+    // public_id → normalized finding, so a chain step resolves to a real finding.
+    const byPid = useMemo(() => {
+      const m = {};
+      (findings || []).forEach((f) => { if (f.publicId) m[f.publicId] = f; });
+      return m;
+    }, [findings]);
+
+    function openFinding(pid) {
+      const f = byPid[pid];
+      if (f && f.file && setSelFile && setTab) { setSelFile(f.file); setTab("findings"); }
+    }
+    function learnMore(p) {
+      if (p.learn_slug && nav) { nav("learning", p.learn_slug); return; }
+      if (nav) nav("learning");
+    }
+
+    if (state.loading) {
+      return h("div", { style: { height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-3)", gap: 10 } },
+        h("div", { className: "spinner", style: { width: 18, height: 18 } }), "Correlating findings into attack chains…");
+    }
+    if (state.error) {
+      return h("div", { style: { height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-3)" } }, "⚠️ " + state.error);
+    }
+    const isReal = Array.isArray(state.paths);
+    const paths = isReal ? state.paths : [];
+    if (isReal && paths.length === 0) {
+      return h("div", { style: { height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "var(--text-3)", gap: 8, padding: 24, textAlign: "center" } },
+        h(Icons.shieldCheck ? Icons.shieldCheck : Icons.shield, { size: 30, style: { color: "var(--sev-clean)", opacity: 0.8 } }),
+        h("div", { style: { fontSize: 14, fontWeight: 600, color: "var(--text-2)" } }, "No attack chains detected"),
+        h("div", { style: { fontSize: 12.5, maxWidth: 440 } }, "We didn't find combinations of these findings that compose into a known exploitation path. Individual findings still matter — see the Vulnerabilities tab."));
+    }
+
+    return h("div", { style: { height: "100%", overflowY: "auto", padding: "20px 24px 60px" } },
+      h("div", { style: { display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 16 } },
+        h(Icons.target, { size: 18, style: { color: "var(--sev-critical)", flexShrink: 0, marginTop: 1 } }),
+        h("div", null,
+          h("h3", { style: { fontSize: 14.5, fontWeight: 650 } }, paths.length + " attack chain" + (paths.length === 1 ? "" : "s") + " detected"),
+          h("p", { style: { fontSize: 12.5, color: "var(--text-3)", marginTop: 2, lineHeight: 1.5, maxWidth: 620 } },
+            "Each chain is a combination of findings that, exploited together, becomes a real hack. Fixing any one link breaks the chain — but the more you close, the better."))),
+      paths.map((p, i) => h(AttackPathCard, { key: p.public_id || i, path: p, byPid, openFinding, learnMore })));
+  }
+
+  function AttackPathCard({ path, byPid, openFinding, learnMore }) {
+    const sev = (path.severity || "high").toLowerCase();
+    const sc = (window.SEV[sev] || window.SEV.high);
+    const pids = path.finding_public_ids || [];
+    const steps = path.steps || [];
+    return h("div", { className: "card", style: { padding: 0, marginBottom: 14, overflow: "hidden", borderLeft: "3px solid " + sc.color } },
+      // Header
+      h("div", { style: { display: "flex", alignItems: "center", gap: 11, padding: "13px 18px", borderBottom: "1px solid var(--border)" } },
+        h(SevBadge, { sev }, sc.label),
+        h("span", { className: "mono", style: { fontSize: 11, color: "var(--text-3)" } }, path.public_id),
+        h("h4", { style: { fontSize: 14, fontWeight: 650, flex: 1, lineHeight: 1.35 } }, path.name),
+        path.tier === "potential"
+          && h("span", { className: "badge", style: { background: "var(--sev-medium-bg)", color: "var(--sev-medium)" }, title: "Entry point + at least one link present — a plausible partial path, not all links confirmed" }, "Potential"),
+        path.source === "catalog"
+          ? h("span", { className: "badge", style: { background: "var(--bg-inset)", color: "var(--text-3)" }, title: "Matches a known real-world attack chain" }, "Known chain")
+          : h("span", { className: "badge", style: { background: "var(--accent-soft)", color: "var(--accent)" }, title: "Combination identified for this codebase" }, "Detected")),
+      h("div", { style: { padding: "14px 18px 16px" } },
+        // The chain: clickable finding links joined by arrows.
+        h("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: 7, marginBottom: 12 } },
+          pids.map((pid, i) => {
+            const f = byPid[pid];
+            const label = (f && f.name) || pid;
+            return h(React.Fragment, { key: pid },
+              i > 0 && h(Icons.chevR, { size: 14, style: { color: "var(--text-3)", flexShrink: 0 } }),
+              h("button", { onClick: () => openFinding(pid),
+                title: f ? (label + " — " + (f.file || "")) : ("Finding " + pid),
+                style: { display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 7, background: f ? sc.bg : "var(--bg-inset)", color: f ? sc.color : "var(--text-3)", fontSize: 12, fontWeight: 600, border: "1px solid color-mix(in srgb, " + sc.color + " 22%, transparent)", cursor: f ? "pointer" : "default", transition: "filter var(--dur-micro) ease" },
+                onMouseEnter: (e) => { if (f) e.currentTarget.style.filter = "brightness(1.08)"; },
+                onMouseLeave: (e) => { e.currentTarget.style.filter = "none"; } },
+                h("span", { className: "mono", style: { fontSize: 10.5, opacity: 0.8 } }, pid),
+                h("span", null, label)));
+          })),
+        // Narrative steps (the attacker's progression), when present.
+        steps.length > 0 && h("ol", { style: { margin: "0 0 12px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 5 } },
+          steps.map((s, i) => h("li", { key: i, style: { display: "flex", gap: 9, fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.5 } },
+            h("span", { style: { flexShrink: 0, width: 18, height: 18, borderRadius: "50%", background: "var(--bg-inset)", color: "var(--text-3)", fontSize: 10.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" } }, i + 1),
+            h("span", null, s)))),
+        // Impact + real-world grounding + remediation.
+        path.impact && h(InfoRow, { icon: Icons.zap, color: "var(--sev-critical)", label: "Impact", text: path.impact }),
+        path.real_world && h(InfoRow, { icon: Icons.book, color: "var(--text-2)", label: "Seen in the wild", text: path.real_world }),
+        path.remediation && h(InfoRow, { icon: Icons.shield, color: "var(--sev-clean)", label: "Break the chain", text: path.remediation }),
+        // Learn more.
+        h("button", { className: "btn btn-secondary btn-sm", style: { marginTop: 12 }, onClick: () => learnMore(path) },
+          h(Icons.book, { size: 13 }), "Learn about this attack")));
+  }
+
+  function InfoRow({ icon, color, label, text }) {
+    return h("div", { style: { display: "flex", gap: 9, marginTop: 8 } },
+      h(icon, { size: 14, style: { color, flexShrink: 0, marginTop: 2 } }),
+      h("div", { style: { fontSize: 12.5, lineHeight: 1.55 } },
+        h("span", { style: { fontWeight: 650, color: "var(--text-1)" } }, label + ": "),
+        h("span", { style: { color: "var(--text-2)" } }, text)));
+  }
+  window.AttackPathsTab = AttackPathsTab;
+
   // ============ AI-GEN ANALYSIS ============
   function AiGenTab({ meta }) {
     const API = window.AkiraAPI;
@@ -369,7 +486,7 @@
   // Security-RISK trend: an SVG area+line chart with gridlines and value labels.
   // points[].score carries the RISK value (higher = worse). Needs >=2 scans.
   function ScoreTrendChart({ points }) {
-    const W = 680, Hgt = 150, padL = 30, padR = 14, padT = 16, padB = 26;
+    const W = 680, Hgt = 240, padL = 30, padR = 14, padT = 20, padB = 30;
     const card = (body) => h("div", { className: "card", style: { padding: "16px 20px" } },
       h("div", { style: { fontSize: 13, fontWeight: 650, marginBottom: 4 } }, "Security risk trend"),
       h("div", { style: { fontSize: 11.5, color: "var(--text-3)", marginBottom: 12 } }, "Across this repo's scans (oldest → newest · higher = more risk)"),

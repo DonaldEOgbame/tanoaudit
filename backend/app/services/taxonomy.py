@@ -6,29 +6,13 @@ never ship the whole taxonomy per segment.
 """
 from __future__ import annotations
 
-# 20 top-level security categories.
-CATEGORIES = [
-    "Authentication & Authorization",
-    "Injection",
-    "Data Exposure & Secrets",
-    "Input Validation & Sanitization",
-    "API Security",
-    "Database & Storage",
-    "Dependency & Supply Chain",
-    "Configuration & Infrastructure",
-    "Business Logic",
-    "Cryptography",
-    "AI-Generated Code Specific",
-    "Frontend Specific",
-    "Concurrency & Race Conditions",
-    "Error Handling & Logging",
-    "Memory & Resource Management",
-    "Deserialization",
-    "Cloud & Serverless",
-    "Mobile & Cross-Platform",
-    "WebSocket & Real-Time",
-    "Third-Party Integration & Webhooks",
-]
+from app.services.taxonomy_data import TAXONOMY
+
+# Top-level security categories, derived from the single source of truth so the
+# prompt's category list and the taxonomy/Learning Hub can never drift apart.
+# (Attack chains are a post-scan correlation concern, not a per-file prompt
+# category, so they're intentionally excluded here.)
+CATEGORIES = list(TAXONOMY.keys())
 
 OPTIMIZATION_CATEGORIES = [
     "Performance", "Code Quality", "Scalability", "Dependency Optimization",

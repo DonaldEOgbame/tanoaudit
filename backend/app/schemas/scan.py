@@ -23,11 +23,20 @@ class ScanCreate(BaseModel):
     include_optimization: bool = True
 
 
+class ScanUpdate(BaseModel):
+    """Editable scan metadata: rename (display_name) and pin/unpin."""
+
+    display_name: Optional[str] = Field(default=None, max_length=200)
+    pinned: Optional[bool] = None
+
+
 class ScanOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     source_type: str
+    display_name: Optional[str] = None
+    pinned: bool = False
     repo: Optional[str] = None
     source_url: Optional[str] = None
     repository_id: Optional[str] = None

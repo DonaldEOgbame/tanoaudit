@@ -40,6 +40,16 @@ def _plan_from_tiers(tier_ids: list[str]) -> tuple[list[str], dict[str, str], di
             labels[tier.provider] = tier.label
         if tier.provider not in order:
             order.append(tier.provider)
+    # Keep Gemini wired as an automatic last-resort fallback even though no tier
+    # maps to it anymore: every Akira tier now runs OpenRouter's free model, and
+    # free models rate-limit hard — Gemini catches those storms so scans don't
+    # stall. Vendor stays hidden: a Gemini fallback is attributed to the primary
+    # tier's label (the call uses the per-provider default GEMINI_MODEL).
+    if settings.gemini_api_key and "gemini" not in models:
+        primary_label = labels.get(order[0]) if order else None
+        models["gemini"] = settings.gemini_model
+        labels["gemini"] = primary_label or get_tier(DEFAULT_TIER).label
+        order.append("gemini")
     return order, models, labels
 
 

@@ -83,6 +83,7 @@ async def consume_handoff(
         raise unauthorized("Invalid or expired handoff link")
 
     findings = await ho.select_findings(db, audit_id, valid.scope, valid.finding_ids)
+    attack_paths = await ho.select_attack_paths(db, audit_id, findings)
     valid.used_at = utcnow()  # single-use
     db.add(HandoffEvent(
         user_id=valid.user_id, audit_id=audit_id, kind=EVT_CONSUMED,
@@ -99,7 +100,7 @@ async def consume_handoff(
         f"{len(findings)} finding(s) were fetched via the handoff link.",
         link={"scan_id": audit_id},
     )
-    return ho.render_handoff_markdown(scan, findings)
+    return ho.render_handoff_markdown(scan, findings, attack_paths)
 
 
 @router.get("/handoff-links")

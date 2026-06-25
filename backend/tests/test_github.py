@@ -306,6 +306,49 @@ async def test_post_scan_creates_issues_above_threshold(auth, monkeypatch):
     assert "VLN-0001" in created[0]
 
 
+@pytest.mark.asyncio
+async def test_post_scan_records_issue_failure_in_deliveries(auth, monkeypatch):
+    """A failed issue creation surfaces in the webhook-deliveries feed (502 +
+    error detail) instead of vanishing silently."""
+    import httpx
+    from sqlalchemy import select
+    from app.services.github_post_scan import run_post_scan_github
+
+    client, headers, _ = auth
+    uid = await _uid(client, headers)
+    await _connect(uid, issue_settings={
+        "auto_create": True, "severity_threshold": "high",
+        "labels": [], "label_mapping": {}, "template": "{public_id}: {explanation}",
+    }, status_check={"post_commit_status": False})
+
+    async with SessionLocal() as db:
+        scan = Scan(user_id=uid, source_type="github", repo="user/x",
+                    status=SCAN_COMPLETED, commit="abc")
+        db.add(scan)
+        await db.flush()
+        db.add(Finding(scan_id=scan.id, public_id="VLN-0001", engine=ENGINE_SECURITY,
+                       severity="critical", confidence="High", file="a.js",
+                       line_start=1, line_end=2, explanation="x"))
+        await db.commit()
+        scan_id = scan.id
+
+    async def boom(*a, **k):
+        raise httpx.HTTPStatusError("403", request=None, response=None)
+    monkeypatch.setattr(gh, "create_issue", boom)
+
+    await run_post_scan_github(scan_id)
+
+    async with SessionLocal() as db:
+        rows = (await db.execute(
+            select(WebhookDelivery).where(WebhookDelivery.user_id == uid)
+        )).scalars().all()
+    issue_rows = [r for r in rows if r.event == "issues"]
+    assert len(issue_rows) == 1
+    assert issue_rows[0].status == 502
+    assert issue_rows[0].triggered_scan_id == scan_id
+    assert "failed" in (issue_rows[0].detail or "")
+
+
 # ---- Sign in with GitHub (auth flow) ----------------------------------------
 @pytest.mark.asyncio
 async def test_github_login_start_not_configured(client):

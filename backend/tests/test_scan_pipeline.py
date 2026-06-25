@@ -69,6 +69,19 @@ def test_excludes_node_modules_and_lockfiles(tmp_path):
     assert "package-lock.json" not in paths
 
 
+def test_ignore_globs_exclude_matching_files(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.js").write_text("console.log(1)")
+    (tmp_path / "src" / "app.test.js").write_text("test()")
+    (tmp_path / "dist").mkdir()
+    (tmp_path / "dist" / "bundle.js").write_text("x")
+    files = ingestion.walk_source(str(tmp_path), ignore_globs=["dist/**", "*.test.js"])
+    paths = {f.rel_path for f in files}
+    assert any(p.endswith("app.js") and "test" not in p for p in paths)
+    assert not any("dist" in p for p in paths)
+    assert not any(p.endswith(".test.js") for p in paths)
+
+
 def test_zip_slip_blocked(tmp_path):
     import io
     buf = io.BytesIO()

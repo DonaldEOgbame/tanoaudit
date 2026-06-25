@@ -118,19 +118,69 @@ async def callback_redirect(
     code: str = Query(...),
     state: str = Query(...),
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
-    """Browser callback for the GitHub OAuth round-trip.
+    """Browser callback for GitHub OAuth — shared by both flows:
 
-    GitHub redirects the browser here (a GET) after the user authorizes. We do
-    the code exchange server-side, then redirect back into the SPA with a status
-    flag so the app lands on the Integrations page and shows the result, instead
-    of dead-ending on a raw backend page.
+    * purpose="github_login"  → 'Sign in with GitHub' (issued by /auth/github/start)
+    * purpose="github_oauth"  → repo connection (issued by /github/authorize)
+
+    The purpose is read from the signed state JWT before any further work so
+    the two paths share the single callback URL registered in the GitHub App.
     """
     from urllib.parse import urlencode
 
     from fastapi.responses import RedirectResponse
 
     base = settings.frontend_url.rstrip("/")
+
+    # Decode purpose from the signed state first so we can route correctly.
+    try:
+        state_payload = decode_token(state)
+        purpose = state_payload.get("purpose", "")
+    except Exception:
+        qs = urlencode({"auth": "error", "message": "Invalid sign-in state. Please try again."})
+        return RedirectResponse(url=f"{base}/?{qs}", status_code=303)
+
+    # ---- Login flow --------------------------------------------------------
+    if purpose == "github_login":
+        from app.api.auth import _find_or_create_github_user, _token_pair
+        from app.api.deps import client_info
+        from app.models.user import LoginHistory, Session
+        from app.core.database import utcnow
+
+        def _fail_login(message: str) -> RedirectResponse:
+            qs = urlencode({"auth": "error", "message": message[:300]})
+            return RedirectResponse(url=f"{base}/?{qs}", status_code=303)
+
+        try:
+            result = await gh.exchange_code(code)
+            token = result.get("token")
+            if not token:
+                return _fail_login("GitHub did not return an access token.")
+            profile = await gh.get_user(token)
+            email = profile.get("email") or await gh.get_primary_email(token)
+        except Exception:  # noqa: BLE001
+            return _fail_login("Could not complete GitHub sign-in.")
+
+        if not email:
+            return _fail_login("Your GitHub account has no verified email to sign in with.")
+
+        user = await _find_or_create_github_user(db, email, profile)
+
+        info = client_info(request) if request else {}
+        session = Session(user_id=user.id, last_active_at=utcnow(), **info)
+        db.add(session)
+        db.add(LoginHistory(user_id=user.id, success=True, **info))
+        await db.flush()
+
+        tok = _token_pair(user.id, session.id)
+        frag = urlencode(
+            {"access_token": tok.access_token, "refresh_token": tok.refresh_token}
+        )
+        return RedirectResponse(url=f"{base}/#{frag}", status_code=303)
+
+    # ---- Repo-connection flow ----------------------------------------------
     try:
         _user_id, conn = await _exchange_and_store(code, state, db)
     except Exception as exc:  # noqa: BLE001 — bounce the browser back with an error

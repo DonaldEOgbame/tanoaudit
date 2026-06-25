@@ -153,6 +153,26 @@ async def _github_clone_url(user_id: str, repo_full_name: str) -> str:
     return f"https://github.com/{repo_full_name}.git"
 
 
+async def _ignore_globs_for_scan(db, scan: Scan) -> list[str]:
+    """The user's configured ignore_paths globs for a github scan, if any.
+
+    Non-github scans (URL/ZIP) have no connection settings, so nothing is
+    ignored beyond the built-in excludes.
+    """
+    if scan.source_type != "github":
+        return []
+    from app.models.github import GitHubConnection
+
+    conn = (
+        await db.execute(
+            select(GitHubConnection).where(GitHubConnection.user_id == scan.user_id)
+        )
+    ).scalar_one_or_none()
+    if conn is None:
+        return []
+    return list((conn.triggers or {}).get("ignore_paths") or [])
+
+
 async def _scan_dependencies(scan_id: str, workdir: str) -> None:
     """Parse + enrich dependency manifests and persist ScanDependency rows.
     Fully guarded: any failure is logged and swallowed so the code scan proceeds."""
@@ -291,7 +311,10 @@ async def run_scan(
         else:
             commit = None
 
-        files = ingestion.walk_source(workdir)
+        # For github scans, honor the connection's ignore_paths globs so files
+        # the user excluded (e.g. dist/**, *.test.js) are never analyzed.
+        ignore_globs = await _ignore_globs_for_scan(db, scan)
+        files = ingestion.walk_source(workdir, ignore_globs=ignore_globs)
         # PR-diff scoping: restrict to changed paths when path_filters is set.
         if scan.path_filters:
             wanted = set(scan.path_filters)
@@ -798,6 +821,19 @@ async def _finalize(
 
         await tag_findings_to_goals(scan_id, scan.repository_id)
         await advance_goals_for_repo(scan.repository_id)
+
+    # Correlate findings into attack chains (vulnerability combinations that form
+    # real hacks). Runs after all findings exist; best-effort. `router` carries
+    # the scan's provider keys for the hybrid LLM pass.
+    from app.services.attack_chains import correlate_attack_chains
+
+    await correlate_attack_chains(scan_id, list(findings), router)
+
+    # Grow the Learning Hub: ensure every finding category in this scan has a
+    # class, generating new ones for novel vuln types. Best-effort.
+    from app.services.learning_autogen import ensure_classes_for_scan
+
+    await ensure_classes_for_scan(scan_id)
 
     # Post-scan GitHub actions (auto-issues + commit status), best-effort.
     if scan.source_type == "github":

@@ -127,15 +127,24 @@ class ModelRouter:
         self.events.append(RouterEvent("exhausted", candidates[0] if candidates else "none"))
         return ""
 
-    async def stream(self, prompt: str, model_hint: str | None = None) -> AsyncIterator[str]:
-        """Stream text deltas from the first provider that yields output. On a
-        provider failure before any output, reroute to the next candidate."""
+    async def stream(self, prompt: str, model_hint: str | None = None,
+                     messages: list[dict] | None = None) -> AsyncIterator[str]:
+        """Stream text deltas from the first provider that yields output.
+
+        When `messages` is provided it is forwarded to the streamer so the
+        provider sees proper system/user/assistant roles instead of a flat blob.
+        On a provider failure before any output, reroute to the next candidate.
+        """
         candidates = self._ordered_candidates(model_hint)
         for provider in candidates:
             produced = False
             try:
-                async for delta in STREAMERS[provider](
-                    self.keys[provider], prompt, self.models.get(provider)
+                import inspect as _inspect
+                streamer = STREAMERS[provider]
+                sig = _inspect.signature(streamer)
+                kwargs = {"messages": messages} if messages and "messages" in sig.parameters else {}
+                async for delta in streamer(
+                    self.keys[provider], prompt, self.models.get(provider), **kwargs
                 ):
                     produced = True
                     yield delta

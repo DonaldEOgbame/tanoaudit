@@ -94,6 +94,21 @@ code, pre, .mono { font-family: var(--font-mono); }
 .sb-item svg { flex-shrink: 0; }
 .sb-foot { border-top: 1px solid var(--border); padding: 8px; position: relative; }
 
+/* Recent-scan rows: hover/menu reveal a "⋯" action button on the right. */
+.sb-scan-row .sb-item { padding-right: 30px; }
+@media (prefers-reduced-motion: no-preference) {
+  /* Don't slide the row label under the ⋯ button on hover. */
+  .sb-scan-row .sb-item:hover { transform: none; }
+}
+.sb-scan-more {
+  opacity: 0; pointer-events: none; color: var(--text-3);
+  display: flex; align-items: center; justify-content: center;
+  transition: opacity var(--dur-micro) ease, background var(--dur-micro) ease, color var(--dur-micro) ease;
+}
+.sb-scan-row:hover .sb-scan-more,
+.sb-scan-row.menu-open .sb-scan-more { opacity: 1; pointer-events: auto; }
+.sb-scan-more:hover { background: var(--bg-active); color: var(--text-1); }
+
 /* ===== Top bar of main area ===== */
 .vs-topbar {
   height: 52px; flex-shrink: 0; display: flex; align-items: center; gap: 12px;

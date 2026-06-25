@@ -54,9 +54,31 @@ def test_system_prompt_includes_context_and_rules():
                 category="Injection", severity="critical", confidence="High",
                 file="a.js", line_start=1, line_end=2, fix_summary="fix")
     prompt = build_system_prompt(scan, [f])
-    assert "ABSOLUTE, NO EXCEPTIONS" in prompt
+    assert "RULES:" in prompt
     assert "VLN-0001" in prompt
     assert "user/x" in prompt
+
+
+def test_system_prompt_includes_attack_paths():
+    from app.models.attack_path import AttackPath
+    scan = Scan(repo="user/x", security_score=0, optimization_score=80,
+                files=3, segment_total=3)
+    p = AttackPath(
+        public_id="CHN-0001", name="SSRF → Cloud Metadata → Credential Theft",
+        severity="critical", source="catalog",
+        finding_public_ids=["VLN-0009", "VLN-0008"], steps=["a", "b"],
+        impact="steal cloud creds", real_world="Capital One 2019",
+    )
+    prompt = build_system_prompt(scan, [], [p])
+    assert "CHN-0001" in prompt
+    assert "Credential Theft" in prompt
+    assert "Attack paths" in prompt
+    # The rule instructing the model to use chains must be present.
+    assert "ATTACK PATHS are combinations" in prompt
+    # Back-compat: omitting attack_paths still produces a valid prompt with an
+    # empty paths data block (the example "CHN-0001" in the rules still appears).
+    assert "Attack paths" in prompt and '"name": "SSRF' in prompt
+    assert '"name": "SSRF' not in build_system_prompt(scan, [])
 
 
 @pytest.mark.parametrize("msg", [

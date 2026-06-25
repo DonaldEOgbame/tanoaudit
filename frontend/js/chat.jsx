@@ -109,6 +109,21 @@ Fixing **Auth & Authorization** first neutralizes ~25% of the attack surface wit
     if (lq.includes("optim") || lq.includes("performance") || lq.includes("latency")) return EXACT["Summarize the optimization opportunities"];
     if (lq.includes("group") || lq.includes("cluster") || lq.includes("categor")) return EXACT["Group related findings together"];
     if (lq.includes("stub") || lq.includes("placeholder") || lq.includes("incomplete") || lq.includes("todo") || lq.includes("complete")) return EXACT["What stubs are most dangerous to ship?"];
+    if (lq.includes("attack") || lq.includes("chain") || lq.includes("exploit") || lq.includes("path") || lq.includes("dangerous") || lq.includes("chained")) {
+      return `The scan detected **2 attack chains** — combinations of individual findings that, exploited in sequence, form a real-world hack:
+
+**Chain 1 — Auth bypass → privilege escalation (Critical)**
+An attacker forges an admin token via the JWT signature bypass (VS-002), then exploits the empty RBAC guard (STB-0001) to gain full admin access — no brute-force needed. Every admin endpoint is wide open until both are fixed.
+
+**Chain 2 — Credential theft → lateral movement (High)**
+The hardcoded Stripe key (VS-003) is accessible to any collaborator with read access. Combined with the eval-based RCE in the webhook handler (VS-004), an attacker can exfiltrate credentials and pivot to other infrastructure from a single malicious webhook payload.
+
+**How dangerous are they?**
+- Chain 1 is remotely exploitable right now with zero credentials. Fix VS-002 + STB-0001 first.
+- Chain 2 requires repo access, but VS-004 is reachable from the public webhook endpoint.
+
+Fixing **VS-002, STB-0001, VS-003, and VS-004** breaks both chains. Their diffs are ready in the **Vulnerabilities** and **Stubs** tabs.`;
+    }
     if (lq.includes("jwt") || lq.includes("token") || lq.includes("session") || (lq.includes("auth") && !lq.includes("authori"))) {
       return `VS-002 is a **JWT signature bypass** in \`src/middleware/auth.js\` — the server accepts tokens with \`algorithm: "none"\`, meaning an attacker can forge a valid admin token with no secret key at all.
 
@@ -141,13 +156,13 @@ Anyone who can POST to \`/webhooks\` can execute arbitrary Node.js on the server
 
 **Fix:** Remove \`eval()\`. Use a strict allowlist of handler names if dynamic dispatch is needed. The safe alternative is in VS-004's diff panel.`;
     }
-    const onTopic = ["find","vuln","scan","secur","code","fix","optim","risk","critical","high","medium","low","depend","src/",".js",".ts","route","middleware","service","stub","placeholder","incomplete","todo","complete"].some(k => lq.includes(k));
+    const onTopic = ["find","vuln","scan","secur","code","fix","optim","risk","critical","high","medium","low","depend","src/",".js",".ts","route","middleware","service","stub","placeholder","incomplete","todo","complete","attack","chain","exploit","path"].some(k => lq.includes(k));
     if (!onTopic) return "I can only help with findings from this scan. Is there something specific about the vulnerabilities or optimizations you'd like to dig into?";
     return `Based on this scan of \`user/ecommerce-api\`:
 
-The scan found **32 security findings** across 24 files — 4 Critical, 9 High, 11 Medium, 5 Low, 3 Info — plus 13 optimization opportunities.
+The scan found **32 security findings** across 24 files — 4 Critical, 9 High, 11 Medium, 5 Low, 3 Info — plus 13 optimization opportunities and **2 attack chains**.
 
-The most urgent issues are around **authentication** (VS-002), **injection** (VS-001), and **exposed secrets** (VS-003).
+The most urgent issues are around **authentication** (VS-002), **injection** (VS-001), and **exposed secrets** (VS-003). See the **Attack Paths** tab for the detected exploitation chains.
 
 Is there a specific finding, file, or category you'd like me to explain?`;
   }
@@ -362,13 +377,52 @@ Is there a specific finding, file, or category you'd like me to explain?`;
 
   const INIT_MSGS = [{ id: 0, role: "ai", text: EXEC_SUMMARY, initial: true }];
 
-  function ReportChat({ setTab, meta, findings }) {
+  // Summary for a real scan that has no backend-generated ai_summary. Reports
+  // only what was actually captured — partial findings if the scan was cut short,
+  // otherwise an honest "nothing to report". Never invents demo content.
+  function realScanFallbackSummary(meta, findings, attackPaths) {
+    const all = findings || [];
+    const paths = attackPaths || [];
+    const incomplete = meta && (meta.status === "cancelled" || meta.status === "canceled" || meta.status === "failed");
+    const n = (p) => all.filter(p).length;
+    const vuln = n((f) => f.type === "vuln");
+    const opt = n((f) => f.type === "opt");
+    const stub = n((f) => f.type === "stub");
+    const crit = n((f) => f.sev === "critical");
+    const high = n((f) => f.sev === "high");
+
+    // "was cancelled" reads well; "failed" doesn't take "was".
+    const verb = meta && meta.status === "failed" ? "**failed**" : "was **" + (meta ? meta.status : "stopped") + "**";
+
+    if (all.length === 0 && paths.length === 0) {
+      if (incomplete) {
+        return "This scan " + verb + " before any findings were recorded, so there is nothing to report. Re-run the scan to get a full analysis.";
+      }
+      return "This scan completed without recording any findings — no vulnerabilities, optimizations, or stubs were flagged.";
+    }
+
+    // We have partial findings — report exactly those, framed by status.
+    const parts = [];
+    if (vuln) parts.push("**" + vuln + "** " + (vuln === 1 ? "vulnerability" : "vulnerabilities") + (crit + high ? " (" + [crit && crit + " critical", high && high + " high"].filter(Boolean).join(", ") + ")" : ""));
+    if (opt) parts.push("**" + opt + "** optimization " + (opt === 1 ? "finding" : "findings"));
+    if (stub) parts.push("**" + stub + "** " + (stub === 1 ? "stub/placeholder" : "stubs/placeholders"));
+    if (paths.length) parts.push("**" + paths.length + "** attack " + (paths.length === 1 ? "chain" : "chains"));
+    const list = parts.join(", ").replace(/, ([^,]*)$/, " and $1");
+    const lead = incomplete
+      ? "This scan " + verb + " before finishing. Partial results captured so far: "
+      : "This scan recorded ";
+    const tail = incomplete ? " These are partial — re-run the scan for complete coverage." : "";
+    return lead + list + "." + tail;
+  }
+
+  function ReportChat({ setTab, meta, findings, attackPaths }) {
     const API = window.AkiraAPI;
     const META = meta || window.VS_REPO_META;
     const scanId = META && META.id && meta ? META.id : null; // only treat as real when meta came from a scan
     const storageKey = scanId ? "akira:chat:" + scanId : "akira:chat:demo";
 
     const getBaseInitial = React.useCallback(() => {
+      // Real scan with a backend-generated summary — use it verbatim.
       if (scanId && META.summary) {
         let text = META.summary;
         if (text.trim().startsWith("{")) {
@@ -381,20 +435,32 @@ Is there a specific finding, file, or category you'd like me to explain?`;
         }
         return [{ id: 0, role: "ai", text, initial: true }];
       }
+      // Real scan with NO summary (cancelled/failed before one was generated, or
+      // a completed scan that produced none). Never fall back to the demo prose —
+      // report only what was actually captured, derived from real findings.
+      if (scanId) {
+        return [{ id: 0, role: "ai", text: realScanFallbackSummary(META, findings, attackPaths), initial: true }];
+      }
+      // No scanId at all → demo/preview mode.
       return INIT_MSGS;
-    }, [scanId, META.summary]);
+    }, [scanId, META.summary, META.status, findings, attackPaths]);
 
     const initial = React.useMemo(() => {
+      const base = getBaseInitial();
       const cached = localStorage.getItem(storageKey);
       if (cached) {
         try {
           const parsed = JSON.parse(cached);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            return parsed;
+            // Always re-derive the initial summary from current scan state so a
+            // stale cached summary (e.g. old demo prose) can't persist; keep any
+            // cached conversation that followed it.
+            const rest = parsed.filter((m) => !m.initial);
+            return [...base, ...rest];
           }
         } catch (e) {}
       }
-      return getBaseInitial();
+      return base;
     }, [storageKey, getBaseInitial]);
 
     const [messages, setMessages] = useState(initial);
@@ -443,6 +509,7 @@ Is there a specific finding, file, or category you'd like me to explain?`;
     function onRef(token, sev) {
       if (token.startsWith("STB-")) setTab("stubs");
       else if (sev === "file" || token.startsWith("OPT-")) setTab("optimizations");
+      else if (token.startsWith("AP-") || token.startsWith("ATC-")) setTab("attack-paths");
       else setTab("findings");
     }
 
@@ -490,6 +557,15 @@ Is there a specific finding, file, or category you'd like me to explain?`;
         const history = messages
           .filter((m) => !m.thinking && !m.initial && (m.role === "user" || m.role === "ai"))
           .map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text }));
+        // Build a compact attack-paths context string so the LLM is aware of chains.
+        const paths = attackPaths || [];
+        const attackPathsContext = paths.length
+          ? paths.map((p, i) =>
+              (i + 1) + ". " + (p.name || "Attack chain") + " [" + (p.severity || "high") + "]" +
+              (p.finding_public_ids && p.finding_public_ids.length ? " — findings: " + p.finding_public_ids.join(", ") : "") +
+              (p.impact ? " — impact: " + p.impact : "")
+            ).join("\n")
+          : null;
         let acc = "";
         let n = 0;
         const ctl = API.chat.send(scanId, q, history, (evt) => {
@@ -508,7 +584,7 @@ Is there a specific finding, file, or category you'd like me to explain?`;
             acc += evt;
             setMessages(p => p.map(m => m.id === aid ? { ...m, thinking: false, text: acc } : m));
           }
-        }, tier);
+        }, tier, attackPathsContext);
         ctl.promise
           .then(() => {
             setMessages(p => p.map(m => m.id === aid ? { ...m, thinking: false, text: acc || "(no response)" } : m));
@@ -573,10 +649,33 @@ Is there a specific finding, file, or category you'd like me to explain?`;
                     // Security RISK = 100 − security_score: higher = more risk (BAD),
                     // so a high gauge lights more red ticks. Optimization and
                     // Completeness are shown as-is (higher = better).
-                    m.initial && h("div", { style: { display: "flex", justifyContent: "center", gap: 28, padding: "4px 0 14px", marginBottom: 12, borderBottom: "1px solid var(--border)", flexWrap: "wrap" } },
-                      h(window.SegmentArc, { value: Math.max(0, Math.min(100, 100 - (META.score || 0))), size: 100, label: "Security Risk", color: "oklch(58% 0.26 18)", sublabel: "/ 100" }),
-                      h(window.SegmentArc, { value: META.optScore, size: 100, label: "Optimization", color: "oklch(58% 0.28 280)", sublabel: "/ 100" }),
-                      h(window.SegmentArc, { value: META.stubScore, size: 100, label: "Completeness", color: "oklch(64% 0.13 180)", sublabel: "/ 100" })),
+                    // Only show scores for a completed scan. A cancelled/failed
+                    // scan never finished computing them, so the gauges would be
+                    // misleading (0 or stale) — show a status banner instead.
+                    m.initial && (() => {
+                      // Only a completed scan has real scores. Anything else
+                      // (cancelled/failed, or still running/queued) hasn't
+                      // finished computing them — show a status banner instead
+                      // of misleading 100/0/0 gauges (null scores → 0).
+                      const st = META.status;
+                      const terminalBad = st === "cancelled" || st === "canceled" || st === "failed";
+                      const inProgress = st === "running" || st === "claimed" || st === "queued" || st === "pending";
+                      if (terminalBad || inProgress) {
+                        const verb = terminalBad ? (st + " before completing") : "is still " + st;
+                        const tail = terminalBad
+                          ? " No scores are available. Re-run the scan to get results."
+                          : " Scores will appear here once the scan finishes.";
+                        return h("div", { style: { display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", marginBottom: 12, borderRadius: 10, background: "var(--bg-active)", border: "1px solid var(--border)" } },
+                          inProgress ? h("div", { className: "spinner", style: { width: 15, height: 15 } }) : h(Icons.alert, { size: 16, color: "var(--sev-critical)" }),
+                          h("div", { style: { fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.5 } },
+                            h("span", { style: { fontWeight: 650, color: "var(--text-1)" } }, "This scan " + verb + "."),
+                            tail));
+                      }
+                      return h("div", { style: { display: "flex", justifyContent: "center", gap: 28, padding: "4px 0 14px", marginBottom: 12, borderBottom: "1px solid var(--border)", flexWrap: "wrap" } },
+                            h(window.SegmentArc, { value: Math.max(0, Math.min(100, 100 - (META.score || 0))), size: 100, label: "Security Risk", color: "oklch(58% 0.26 18)", sublabel: "/ 100" }),
+                            h(window.SegmentArc, { value: META.optScore, size: 100, label: "Optimization", color: "oklch(58% 0.28 280)", sublabel: "/ 100" }),
+                            h(window.SegmentArc, { value: META.stubScore, size: 100, label: "Completeness", color: "oklch(64% 0.13 180)", sublabel: "/ 100" }));
+                    })(),
                     m.thinking ? h(ThinkingDots) : renderMarkdown(m.text, onRef)),
                   // Action row under finished AI messages (copy / feedback)
                   !m.thinking && m.text && h(AiActions, { msg: m, hovered: hoveredMsg === m.id }),

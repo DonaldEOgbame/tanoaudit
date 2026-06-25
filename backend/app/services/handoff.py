@@ -25,6 +25,7 @@ from app.models.handoff import (
     SCOPE_STUBS,
     HandoffToken,
 )
+from app.models.attack_path import AttackPath
 from app.models.scan import (
     ENGINE_OPTIMIZATION,
     ENGINE_SECURITY,
@@ -100,6 +101,28 @@ async def select_findings(
         ids = set(finding_ids or [])
         return [f for f in rows if f.id in ids or f.public_id in ids]
     return rows
+
+
+async def select_attack_paths(
+    db: AsyncSession, audit_id: str, findings: list[Finding]
+) -> list[AttackPath]:
+    """Attack chains relevant to the findings being handed off.
+
+    A chain is included when at least one of its constituent findings (referenced
+    by public id) is in the selected set. So security/all/critical-high handoffs
+    carry their chains, while an optimizations-only or stubs-only handoff — which
+    selects no security findings — carries none, since chains are security-derived.
+    """
+    selected_ids = {f.public_id for f in findings if f.public_id}
+    if not selected_ids:
+        return []
+    paths = (
+        await db.execute(select(AttackPath).where(AttackPath.scan_id == audit_id))
+    ).scalars().all()
+    return [
+        p for p in paths
+        if selected_ids.intersection(p.finding_public_ids or [])
+    ]
 
 
 async def active_token_count(db: AsyncSession, user_id: str) -> int:
@@ -198,24 +221,68 @@ def _render_stub_block(f: Finding) -> str:
     return "\n".join(lines)
 
 
-def render_handoff_markdown(scan: Scan, findings: list[Finding]) -> str:
+def _render_attack_path_block(p: AttackPath) -> str:
+    sev = (p.severity or "high").upper()
+    refs = ", ".join(p.finding_public_ids or []) or "—"
+    lines = [
+        f"### {p.public_id} | {sev} | {p.name}",
+        f"- **Tier:** {p.tier}",
+        f"- **Chained findings:** {refs}",
+    ]
+    if p.cwe_id:
+        lines.append(f"- **CWE:** {p.cwe_id}")
+    lines.append("")
+    steps = p.steps or []
+    if steps:
+        lines.append("**Exploitation steps:**")
+        for i, step in enumerate(steps, 1):
+            text = step.get("text") if isinstance(step, dict) else str(step)
+            lines.append(f"{i}. {text}")
+        lines.append("")
+    if p.impact:
+        lines += ["**Impact if chained:**", p.impact, ""]
+    if p.real_world:
+        lines += ["**Real-world precedent:**", p.real_world, ""]
+    if p.remediation:
+        lines += ["**Break the chain:**", p.remediation, ""]
+    lines += ["", "---", ""]
+    return "\n".join(lines)
+
+
+def render_handoff_markdown(
+    scan: Scan, findings: list[Finding], attack_paths: list[AttackPath] | None = None
+) -> str:
+    attack_paths = attack_paths or []
     sec = [f for f in findings if f.engine == ENGINE_SECURITY]
     opt = [f for f in findings if f.engine == ENGINE_OPTIMIZATION]
     stub = [f for f in findings if f.engine == ENGINE_STUB]
     date = (scan.completed_at or scan.created_at)
     date_str = date.strftime("%Y-%m-%d") if date else "—"
 
+    chain_note = f", {len(attack_paths)} attack chains" if attack_paths else ""
     head = [
         "# Akira AI Security Audit Handoff",
         f"## Repository: {scan.repo or scan.id}",
         f"## Branch: {scan.branch or '—'} @ {scan.commit or '—'}",
         f"## Scan date: {date_str}",
         f"## Findings included: {len(findings)} ({len(sec)} security, "
-        f"{len(opt)} optimizations, {len(stub)} stubs)",
+        f"{len(opt)} optimizations, {len(stub)} stubs{chain_note})",
         "",
         "---",
         "",
     ]
+
+    # Attack chains first: they explain how the individual findings below combine
+    # into a real exploit, so Claude sees the big picture before the line items.
+    if attack_paths:
+        head += [
+            "## Attack Chains",
+            "These are *combinations* of the findings below that form a real "
+            "exploitation path. Breaking any one link defeats the chain.",
+            "",
+        ]
+        for p in attack_paths:
+            head.append(_render_attack_path_block(p))
 
     blocks = []
     # Group by engine so the body matches the header summary ordering.

@@ -8,24 +8,46 @@
   const API = window.AkiraAPI;
 
   function Field({ label, type, value, onChange, autoFocus, placeholder, autoComplete, onEnter }) {
+    const [reveal, setReveal] = useState(false);
+    const isPassword = type === "password";
+    // Show plain text when the eye is toggled on; otherwise honor the given type.
+    const effectiveType = isPassword && reveal ? "text" : (type || "text");
     return h("label", { style: { display: "flex", flexDirection: "column", gap: 6 } },
       h("span", { style: { fontSize: 12.5, fontWeight: 550, color: "var(--text-2)" } }, label),
-      h("input", {
-        className: "input",
-        type: type || "text",
-        value, autoComplete, placeholder, autoFocus,
-        onChange: (e) => onChange(e.target.value),
-        onKeyDown: (e) => { if (e.key === "Enter" && onEnter) onEnter(); },
-        style: {
-          background: "var(--bg-2, var(--bg-active))", border: "1px solid var(--border)",
-          borderRadius: 9, padding: "10px 12px", fontSize: 14, color: "var(--text-1)", outline: "none",
-        },
-      }),
+      h("div", { style: { position: "relative", display: "flex" } },
+        h("input", {
+          className: "input",
+          type: effectiveType,
+          value, autoComplete, placeholder, autoFocus,
+          onChange: (e) => onChange(e.target.value),
+          onKeyDown: (e) => { if (e.key === "Enter" && onEnter) onEnter(); },
+          style: {
+            flex: 1, width: "100%",
+            background: "var(--bg-2, var(--bg-active))", border: "1px solid var(--border)",
+            borderRadius: 9, padding: "10px 12px", fontSize: 14, color: "var(--text-1)", outline: "none",
+            paddingRight: isPassword ? 40 : 12,
+          },
+        }),
+        isPassword && h("button", {
+          type: "button",
+          onClick: () => setReveal((v) => !v),
+          "aria-label": reveal ? "Hide password" : "Show password",
+          title: reveal ? "Hide password" : "Show password",
+          tabIndex: -1,
+          style: {
+            position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            width: 26, height: 26, padding: 0, borderRadius: 6,
+            background: "none", border: "none", cursor: "pointer", color: "var(--text-3)",
+          },
+        }, h((reveal ? Icons.eyeOff : Icons.eye) || (() => null), { size: 16 })),
+      ),
     );
   }
 
-  // Social login buttons (Google / GitHub). The OAuth backend isn't wired yet,
-  // so these surface a "coming soon" notice for now — the UI is ready for it.
+  // Social login buttons (Google / GitHub). Both are wired to real OAuth start
+  // endpoints; each surfaces a clear "not configured" error if the server lacks
+  // that provider's client credentials.
   function SocialButton({ provider, label, onClick }) {
     const icon = provider === "github"
       ? h("svg", { width: 18, height: 18, viewBox: "0 0 24 24", fill: "currentColor" },
@@ -114,9 +136,16 @@
       }
     }
 
-    function googleSoon() {
-      setNotice("Google sign-in is coming soon — use GitHub or email for now.");
-      setError(null);
+    async function googleLogin() {
+      setError(null); setNotice(null); setBusy(true);
+      try {
+        await API.auth.googleStart(); // navigates away to Google on success
+      } catch (e) {
+        setBusy(false);
+        setError(e && e.code === "google_not_configured"
+          ? "Google sign-in isn't configured on this server yet."
+          : (e && e.message) || "Could not start Google sign-in.");
+      }
     }
 
     return h("div", {
@@ -185,7 +214,7 @@
 
           !needTotp && h(React.Fragment, null,
             h("div", { style: { display: "flex", gap: 12 } },
-              h(SocialButton, { provider: "google", label: "Google", onClick: googleSoon }),
+              h(SocialButton, { provider: "google", label: "Google", onClick: googleLogin }),
               h(SocialButton, { provider: "github", label: "GitHub", onClick: githubLogin }),
             ),
             h("div", { style: { display: "flex", alignItems: "center", gap: 12 } },

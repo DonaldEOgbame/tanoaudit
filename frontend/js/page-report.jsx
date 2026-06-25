@@ -60,6 +60,7 @@
     const hl = getDiffHighlights(f.code_snippet, f.fix_snippet);
     return {
       id: f.id,
+      publicId: f.public_id || "",
       type,
       sev,
       name: f.subcategory || f.category || (f.stub_category) || "Finding",
@@ -142,25 +143,29 @@
     const [handoffOpen, setHandoffOpen] = useState(false);
     const [watched, setWatched] = useState(false);
 
-    // Load the real scan + findings. Falls back to demo globals when no scanId
-    // (e.g. the dashboard "view sample" path) so the showcase still renders.
-    const [state, setState] = useState({ loading: !!scanId, error: null, meta: null, findings: null });
+    // Load the real scan + findings + attack paths. Falls back to demo globals
+    // when no scanId (e.g. the dashboard "view sample" path).
+    const [state, setState] = useState({ loading: !!scanId, error: null, meta: null, findings: null, attackPaths: null });
+    const [attackPathCount, setAttackPathCount] = useState(0);
     useEffect(() => {
       if (!scanId) {
-        setState({ loading: false, error: null, meta: window.VS_REPO_META, findings: window.VS_FINDINGS });
+        const demoPaths = window.VS_ATTACK_PATHS || [];
+        setState({ loading: false, error: null, meta: window.VS_REPO_META, findings: window.VS_FINDINGS, attackPaths: demoPaths });
+        setAttackPathCount(demoPaths.length);
         if (onLoadRepo && window.VS_REPO_META && window.VS_REPO_META.repo) {
           onLoadRepo(window.VS_REPO_META.repo);
         }
         return;
       }
       let alive = true;
-      setState({ loading: true, error: null, meta: null, findings: null });
+      setState({ loading: true, error: null, meta: null, findings: null, attackPaths: null });
       Promise.all([
         API.scans.get(scanId),
         API.scans.findings(scanId),
-        API.watchlist.list().catch(() => [])
+        API.watchlist.list().catch(() => []),
+        API.scans.attackPaths(scanId).catch(() => []),
       ])
-        .then(([scan, finds, wList]) => {
+        .then(([scan, finds, wList, paths]) => {
           if (!alive) return;
           const meta = metaFromScan(scan);
           if (onLoadRepo && meta.repo) {
@@ -168,18 +173,22 @@
           }
           const isWatched = meta.repository_id ? (wList || []).some((w) => w.id === meta.repository_id) : false;
           setWatched(isWatched);
+          const normalizedPaths = Array.isArray(paths) ? paths : [];
+          setAttackPathCount(normalizedPaths.length);
           setState({
             loading: false, error: null,
             meta,
             findings: (finds || []).map(normalizeFinding),
+            attackPaths: normalizedPaths,
           });
         })
-        .catch((e) => { if (alive) setState({ loading: false, error: (e && e.message) || "Failed to load scan", meta: null, findings: null }); });
+        .catch((e) => { if (alive) setState({ loading: false, error: (e && e.message) || "Failed to load scan", meta: null, findings: null, attackPaths: null }); });
       return () => { alive = false; };
     }, [scanId]);
 
     const META = state.meta || { repo: repo || "scan", branch: "", commit: "", files: 0, segments: 0, duration: "", score: 0, optScore: 0, stubScore: 0 };
     const ALL = state.findings || [];
+    const ATTACK_PATHS = state.attackPaths || [];
 
     const counts = useMemo(() => {
       const c = { critical: 0, high: 0, medium: 0, low: 0, info: 0, opt: 0, stub: 0 };
@@ -264,6 +273,7 @@
       { id: "findings", label: "Vulnerabilities", count: totalSec },
       { id: "optimizations", label: "Optimizations", count: counts.opt },
       { id: "stubs", label: "Stubs", count: counts.stub },
+      { id: "attack-paths", label: "Attack Paths", count: attackPathCount || undefined },
       { id: "dependencies", label: "Dependencies" },
       { id: "aigen", label: "AI-Gen Analysis" },
       { id: "history", label: "History" },
@@ -305,8 +315,9 @@
 
       // ===== Tab content =====
       h("div", { style: { flex: 1, minHeight: 0, overflow: "hidden" } },
-        tab === "overview" && h(OverviewTab, { setTab, meta: META, findings: ALL }),
+        tab === "overview" && h(OverviewTab, { setTab, meta: META, findings: ALL, attackPaths: ATTACK_PATHS }),
         (tab === "findings" || tab === "optimizations" || tab === "stubs") && h(window.FindingsTab, { key: tab, mode: tab, selFile, setSelFile, suppressed, setSuppressed, toast, nav, findings: ALL, meta: META }),
+        tab === "attack-paths" && h(window.AttackPathsTab, { meta: META, findings: ALL, setTab, setSelFile, nav }),
         tab === "dependencies" && h(window.DepsTab, { meta: META }),
         tab === "aigen" && h(window.AiGenTab, { meta: META }),
         tab === "history" && h(window.HistoryTab, { meta: META })),
@@ -315,9 +326,9 @@
   window.ScanReport = ScanReport;
 
   // ===== Overview tab =====
-  function OverviewTab({ setTab, meta, findings }) {
+  function OverviewTab({ setTab, meta, findings, attackPaths }) {
     return h("div", { style: { height: "100%", overflow: "hidden", display: "flex", flexDirection: "column" } },
-      h(window.ReportChat, { setTab, meta, findings }));
+      h(window.ReportChat, { setTab, meta, findings, attackPaths }));
   }
 
   function SharePopover({ toast, onClose, scanId, meta }) {

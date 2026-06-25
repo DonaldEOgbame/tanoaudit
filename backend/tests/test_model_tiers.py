@@ -27,7 +27,8 @@ def test_public_catalog_hides_vendors():
 
 
 def test_resolve_tier_to_provider_model():
-    assert model_catalog.resolve("akira_fast") == ("gemini", settings.tier_fast_model)
+    # All tiers now run on the OpenRouter provider (Gemini is a fallback only).
+    assert model_catalog.resolve("akira_fast") == ("openrouter", settings.tier_fast_model)
     assert model_catalog.resolve("akira_deep") == ("openrouter", settings.tier_deep_model)
     # Unknown id -> default tier, never a crash.
     assert model_catalog.resolve("nope") == model_catalog.resolve(model_catalog.DEFAULT_TIER)

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.database import SessionLocal, get_db, utcnow
 from app.core.errors import APIError, envelope, not_found
+from app.models.attack_path import AttackPath
 from app.models.chat import ChatLog
 from app.models.scan import Finding, Scan
 from app.models.user import User
@@ -105,6 +106,12 @@ async def chat(
     findings = (
         await db.execute(select(Finding).where(Finding.scan_id == scan_id))
     ).scalars().all()
+    attack_paths = (
+        await db.execute(
+            select(AttackPath).where(AttackPath.scan_id == scan_id)
+            .order_by(AttackPath.public_id)
+        )
+    ).scalars().all()
 
     flagged = looks_like_jailbreak(body.message)
     user_id = user.id
@@ -125,9 +132,12 @@ async def chat(
         return StreamingResponse(refusal_stream(), media_type="text/event-stream")
 
     # Build the strict prompt + provider call.
-    system_prompt = build_system_prompt(scan, findings)
+    system_prompt = build_system_prompt(scan, findings, attack_paths)
     history = [{"role": m.role, "content": m.content} for m in body.messages]
     messages = build_messages(system_prompt, history, body.message)
+    # Keep the flattened prompt as a fallback (used by the no-key path below),
+    # but pass structured messages to the router so providers that support native
+    # chat roles (Gemini systemInstruction, OpenAI-style messages) use them.
     prompt = flatten_for_completion(messages)
     router_obj = await build_router_for_chat(user_id, body.tier, purpose="chat")
     message_text = body.message
@@ -137,8 +147,9 @@ async def chat(
     async def event_stream():
         collected: list[str] = []
         if router_obj.has_any_key():
-            # Real provider-side token streaming.
-            async for delta in router_obj.stream(prompt):
+            # Real provider-side token streaming with structured messages so the
+            # system prompt is honoured as a genuine system role.
+            async for delta in router_obj.stream(prompt, messages=messages):
                 collected.append(delta)
                 yield f"data: {json.dumps({'delta': delta})}\n\n"
             reply = "".join(collected) or REFUSAL
