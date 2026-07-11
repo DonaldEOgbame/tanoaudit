@@ -7,21 +7,9 @@
   const { Avatar, SevDot } = window;
 
   function Logo({ size, collapsed }) {
-    const [isLight, setIsLight] = useState(
-      document.documentElement.getAttribute("data-mode") === "light"
-    );
-    useEffect(() => {
-      const obs = new MutationObserver(() => {
-        setIsLight(document.documentElement.getAttribute("data-mode") === "light");
-      });
-      obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-mode"] });
-      return () => obs.disconnect();
-    }, []);
-
-    if (collapsed) {
-      return h("img", { src: "logo-collapsed.svg?v=3", style: { width: 80, height: 80, objectFit: "contain", flexShrink: 0 }, alt: "TanoAudit Icon" });
-    }
-    return h("img", { src: isLight ? "lightmode-logo.svg?v=3" : "logo.svg?v=3", style: { height: 54, width: "auto", maxWidth: 200, objectFit: "contain" }, alt: "TanoAudit" });
+    return h("span", {
+      style: { color: "var(--text-1)" },
+    }, collapsed ? "TA" : "TanoAudit");
   }
   window.Logo = Logo;
 

@@ -397,6 +397,11 @@
 
   function FloatingShield() {
     return h("div", { style: { display: "flex", justifyContent: "center", marginBottom: 4 } },
-      h("img", { src: "logo.svg?v=3", alt: "TanoAudit", style: { height: 52, width: "auto", objectFit: "contain", animation: "frFloat 3.5s ease-in-out infinite", filter: "drop-shadow(0 8px 24px var(--accent-soft))" } }));
+      h("span", {
+        style: {
+          fontSize: 34, fontWeight: 700, color: "var(--text-1)", letterSpacing: "-0.02em",
+          animation: "frFloat 3.5s ease-in-out infinite", filter: "drop-shadow(0 8px 24px var(--accent-soft))",
+        },
+      }, "TanoAudit"));
   }
 })();

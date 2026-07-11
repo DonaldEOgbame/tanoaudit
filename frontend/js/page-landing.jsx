@@ -48,7 +48,7 @@
         h("a", {
           className: "akl-brand", href: "#/",
           onClick: (e) => { e.preventDefault(); go("#/"); },
-        }, h("img", { src: "logo.svg?v=3", alt: "TanoAudit", className: "akl-brand-logo" })),
+        }, h("span", { className: "akl-brand-text" }, "TanoAudit")),
         h("nav", { className: "akl-nav-links" },
           NAV.map(([label, hash]) => h("a", {
             key: hash, href: hash, className: "akl-nav-link",
@@ -73,7 +73,7 @@
     return h("footer", { className: "akl-footer" },
       h("div", { className: "akl-footer-cols" },
         h("div", { className: "akl-footer-brand" },
-          h("img", { src: "logo.svg?v=3", alt: "TanoAudit", className: "akl-brand-logo" }),
+          h("span", { className: "akl-brand-text" }, "TanoAudit"),
           h("p", { className: "akl-footer-tag" }, "AI security scanning for modern engineering teams."),
         ),
         cols.map(([head, links]) =>

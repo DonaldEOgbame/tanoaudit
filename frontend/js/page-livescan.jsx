@@ -201,15 +201,13 @@
 
     const TICKS = 44;
     const filled = (progress / 100) * TICKS;
-    const isLight = (document.documentElement.getAttribute("data-mode") === "light");
-    const logoSrc = isLight ? "lightmode-logo.svg?v=3" : "logo.svg?v=3";
 
     return h("div", { className: "scan-stage", style: { background: "var(--bg-app)" }, "data-screen-label": "Live Scan" },
       completing && h("div", { className: "scan-complete-flash" }),
 
       // Minimal top bar
       h("div", { style: { position: "relative", zIndex: 2, display: "flex", alignItems: "center", gap: 12, padding: "12px 24px" } },
-        h("img", { src: logoSrc, style: { height: 48, width: "auto", objectFit: "contain" }, alt: "TanoAudit" }),
+        h("span", { style: { fontSize: 20, fontWeight: 700, color: "var(--text-1)", letterSpacing: "-0.02em" } }, "TanoAudit"),
         h("span", { className: "pulse-dot", style: { width: 8, height: 8, borderRadius: "50%", background: "var(--accent)" } }),
         h("div", { style: { fontSize: 13, color: "var(--text-2)" } }, "Scanning ", h("span", { className: "mono", style: { color: "var(--accent)" } }, repo || "user/ecommerce-api")),
         h("div", { style: { flex: 1 } }),

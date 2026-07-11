@@ -1,15 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 80" width="360" height="80" role="img" aria-label="TanoAudit">
-  <defs>
-    <linearGradient id="grad-dark" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" style="stop-color:#00E5A0;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#00B8D9;stop-opacity:1" />
-    </linearGradient>
-  </defs>
-  <!-- Shield icon mark -->
-  <path d="M18 10 L34 10 L34 36 Q34 48 26 54 Q18 48 18 36 Z" fill="url(#grad-dark)" opacity="0.15" rx="3"/>
-  <path d="M20 13 L32 13 L32 35 Q32 45 26 50 Q20 45 20 35 Z" fill="none" stroke="url(#grad-dark)" stroke-width="1.5"/>
-  <path d="M22 28 L25 31 L30 25" fill="none" stroke="#00E5A0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- Wordmark -->
-  <text x="44" y="51" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="30" font-weight="700" letter-spacing="-0.5" fill="url(#grad-dark)">Tano</text>
-  <text x="152" y="51" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="30" font-weight="300" letter-spacing="-0.5" fill="#ffffff">Audit</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 80" width="240" height="80" role="img" aria-label="TanoAudit">
+  <text x="10" y="51" font-family="'Inter', 'Segoe UI', system-ui, sans-serif" font-size="30" letter-spacing="-0.5" fill="#ffffff">
+    <tspan font-weight="700">Tano</tspan><tspan font-weight="300">Audit</tspan>
+  </text>
 </svg>

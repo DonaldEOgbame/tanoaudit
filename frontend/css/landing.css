@@ -54,8 +54,8 @@ body:has(.akl-root) #root {
   display: flex; align-items: center;
 }
 .akl-brand { display: flex; align-items: center; flex: 1; }
-.akl-brand-logo { height: 56px; width: auto; }
-.akl-footer .akl-brand-logo { height: 42px; }
+.akl-brand-text { font-size: 22px; font-weight: 700; color: #ffffff; letter-spacing: -0.02em; }
+.akl-footer .akl-brand-text { font-size: 20px; }
 .akl-nav-links { display: flex; gap: 26px; }
 .akl-nav-link {
   font-size: 13.5px; color: var(--akl-muted); font-weight: 450;

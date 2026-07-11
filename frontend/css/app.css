@@ -557,3 +557,153 @@ html[data-no-anim] * { transition-duration: 0s !important; transition-delay: 0s 
     border-radius: 20px;
   }
 }
+
+/* Split layout: promo panel + form, side by side (both login and sign-up) */
+.ta-auth-shell-split {
+  width: min(1200px, 94vw);
+  height: min(800px, 88vh);
+  display: flex;
+  border: 1px solid #1c1c1e;
+  border-radius: 24px;
+  background: #000000;
+  overflow: hidden;
+  box-shadow: 0 32px 64px rgba(0, 0, 0, 0.85);
+}
+
+.ta-auth-shell-split .ta-auth-card {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: none;
+  background: #000000;
+  padding: 48px 64px;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.ta-auth-promo {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 24px;
+  padding: 48px;
+  background:
+    radial-gradient(circle at 40% 70%, rgba(16, 185, 129, 0.28), transparent 70%),
+    linear-gradient(135deg, #061c15 0%, #020806 100%);
+  border: none;
+  overflow: hidden;
+}
+
+.ta-auth-promo-spacer {
+  flex: 1;
+}
+
+.ta-auth-promo-copy {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 20px;
+  margin-bottom: 4px;
+}
+
+.ta-auth-promo-copy h2 {
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+  margin: 0;
+  line-height: 1.1;
+}
+
+.ta-auth-promo-copy p {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0;
+  max-width: 175px;
+  line-height: 1.4;
+  padding-bottom: 4px;
+}
+
+.ta-auth-promo-steps {
+  display: flex;
+  gap: 12px;
+}
+
+.ta-auth-promo-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 124px;
+  padding: 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  transition: all 0.2s ease;
+}
+
+.ta-auth-promo-step.is-active {
+  background: #ffffff;
+  color: #000000;
+  border-color: #ffffff;
+}
+
+.ta-auth-promo-step-num {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+.ta-auth-promo-step.is-active .ta-auth-promo-step-num {
+  background: #000000;
+  color: #ffffff;
+}
+
+@media (max-width: 800px) {
+  .ta-auth-shell-split {
+    flex-direction: column;
+    border-radius: 20px;
+  }
+  .ta-auth-promo {
+    flex: none;
+    padding: 32px 24px;
+  }
+  .ta-auth-promo-copy {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .ta-auth-promo-copy p {
+    max-width: 100%;
+    padding-bottom: 0;
+  }
+  .ta-auth-promo-steps {
+    gap: 8px;
+  }
+  .ta-auth-promo-step {
+    height: auto;
+    min-height: 80px;
+    gap: 12px;
+  }
+  .ta-auth-shell-split .ta-auth-card {
+    padding: 36px 24px;
+  }
+}
