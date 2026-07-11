@@ -19,7 +19,7 @@ from functools import lru_cache
 from app.services.taxonomy import OPTIMIZATION_CATEGORIES
 from app.services.taxonomy_data import TAXONOMY
 
-logger = logging.getLogger("akira.analysis")
+logger = logging.getLogger("tanoaudit.analysis")
 
 # Stub engine categories are a fixed closed set (see analysis.StubItem).
 _STUB_CATEGORIES = ["Stub", "Placeholder", "Incomplete", "AI-Generated"]

@@ -103,9 +103,9 @@ async def test_usage_aggregate(auth):
 
     r = await client.get(f"{PREFIX}/usage", headers=headers)
     data = r.json()["data"]
-    # Payload exposes vendor-free Akira labels, never the raw provider id.
+    # Payload exposes vendor-free TanoAudit labels, never the raw provider id.
     calls = {c["label"]: c["calls"] for c in data["api_calls_by_provider"]}
-    assert calls["Akira Fast"] == 2 and calls["Akira Balanced"] == 1 and calls["Akira Deep"] == 0
+    assert calls["Fast"] == 2 and calls["Balanced"] == 1 and calls["Deep"] == 0
     for c in data["api_calls_by_provider"]:
         assert "provider" not in c  # internal id not leaked
     assert data["scans_this_month"] == 1

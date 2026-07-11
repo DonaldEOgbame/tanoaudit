@@ -23,13 +23,13 @@ def test_public_catalog_hides_vendors():
     for w in _VENDOR_WORDS:
         assert w not in blob, f"vendor leak in catalog: {w}"
     ids = {t["id"] for t in model_catalog.public_tiers()}
-    assert ids == {"akira_fast", "akira_balanced", "akira_deep"}
+    assert ids == {"tanoaudit_fast", "tanoaudit_balanced", "tanoaudit_deep"}
 
 
 def test_resolve_tier_to_provider_model():
     # All tiers now run on the OpenRouter provider (Gemini is a fallback only).
-    assert model_catalog.resolve("akira_fast") == ("openrouter", settings.tier_fast_model)
-    assert model_catalog.resolve("akira_deep") == ("openrouter", settings.tier_deep_model)
+    assert model_catalog.resolve("tanoaudit_fast") == ("openrouter", settings.tier_fast_model)
+    assert model_catalog.resolve("tanoaudit_deep") == ("openrouter", settings.tier_deep_model)
     # Unknown id -> default tier, never a crash.
     assert model_catalog.resolve("nope") == model_catalog.resolve(model_catalog.DEFAULT_TIER)
 
@@ -52,14 +52,14 @@ async def test_models_endpoint_vendor_free(auth):
 async def test_router_injects_server_keys_and_tier_model(monkeypatch):
     monkeypatch.setattr(settings, "gemini_api_key", "server-gem")
     monkeypatch.setattr(settings, "openrouter_api_key", "server-or")
-    scan = SimpleNamespace(model_mode="manual", models=["akira_deep"], user_id="u1", id="s1")
+    scan = SimpleNamespace(model_mode="manual", models=["tanoaudit_deep"], user_id="u1", id="s1")
     r = await build_router_for_scan(scan)
     assert r.has_any_key()
     assert r.keys["openrouter"] == "server-or"          # server key, not user's
     assert r.models["openrouter"] == settings.tier_deep_model  # concrete tier model
     assert r.order[0] == "openrouter"                   # selected tier preferred
-    # Attribution label is the Akira tier, never the vendor.
-    assert r.label_for("openrouter") == "Akira Deep"
+    # Attribution label is the TanoAudit tier, never the vendor.
+    assert r.label_for("openrouter") == "Deep"
     assert "openrouter" not in r.label_for("openrouter").lower()
 
 

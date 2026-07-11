@@ -31,7 +31,7 @@ async def test_email_otp_enroll_and_login(auth):
     # Now login requires the second factor; correct password alone auto-sends a code.
     sent_outbox.clear()
     r = await client.post(f"{PREFIX}/auth/login",
-                          json={"email": "demo@akira.ai", "password": "supersecret123"})
+                          json={"email": "demo@tanoaudit.ai", "password": "supersecret123"})
     body = r.json()["data"]
     assert body["totp_required"] is True and body["method"] == "email"
     assert body["tokens"] is None
@@ -39,7 +39,7 @@ async def test_email_otp_enroll_and_login(auth):
 
     # Supplying the emailed code completes login.
     r = await client.post(f"{PREFIX}/auth/login",
-                          json={"email": "demo@akira.ai", "password": "supersecret123",
+                          json={"email": "demo@tanoaudit.ai", "password": "supersecret123",
                                 "totp_code": login_code})
     assert r.json()["data"]["tokens"] is not None
 
@@ -69,7 +69,7 @@ async def test_email_otp_disable(auth):
 
     # Login no longer challenges.
     r = await client.post(f"{PREFIX}/auth/login",
-                          json={"email": "demo@akira.ai", "password": "supersecret123"})
+                          json={"email": "demo@tanoaudit.ai", "password": "supersecret123"})
     assert r.json()["data"]["tokens"] is not None
 
 

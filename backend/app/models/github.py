@@ -30,7 +30,7 @@ def _default_issue_settings() -> dict:
         "auto_create": False,
         "severity_threshold": "high",  # critical|high|medium
         "assignee": None,
-        "labels": ["security", "akira-ai"],
+        "labels": ["security", "tanoaudit-ai"],
         "label_mapping": {
             "critical": "security:critical",
             "high": "security:high",
@@ -42,7 +42,7 @@ def _default_issue_settings() -> dict:
             "**CWE:** {cwe_id} · **OWASP:** {owasp_ref}\n\n"
             "{explanation}\n\n"
             "### Suggested fix\n{fix_summary}\n\n"
-            "_Reported by Akira AI._"
+            "_Reported by TanoAudit._"
         ),
     }
 
@@ -51,7 +51,7 @@ def _default_status_check() -> dict:
     return {
         "post_commit_status": True,
         "block_merge_on_critical": False,
-        "check_name": "Akira AI security check",
+        "check_name": "TanoAudit security check",
     }
 
 

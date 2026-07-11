@@ -41,7 +41,7 @@ class ModelRouter:
     keys: dict[str, str]                    # provider -> server api key
     order: list[str]                        # fallback / distribution order (providers)
     models: dict[str, str] = field(default_factory=dict)   # provider -> concrete model id
-    tier_labels: dict[str, str] = field(default_factory=dict)  # provider -> Akira tier label
+    tier_labels: dict[str, str] = field(default_factory=dict)  # provider -> TanoAudit tier label
     mode: str = "auto"                      # auto | manual
     # Usage attribution (Module 16) — set so each call is logged.
     user_id: str | None = None
@@ -198,8 +198,8 @@ class ModelRouter:
         raise last_exc
 
     def label_for(self, provider: str | None) -> str | None:
-        """User-facing attribution label. Returns the Akira tier label for the
+        """User-facing attribution label. Returns the TanoAudit tier label for the
         provider (never the vendor name); falls back to a generic label."""
         if not provider:
             return None
-        return self.tier_labels.get(provider) or "Akira"
+        return self.tier_labels.get(provider) or "TanoAudit"

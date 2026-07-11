@@ -116,20 +116,20 @@ async def test_verification_downgrades_on_disagreement(monkeypatch):
     _completers(monkeypatch, {"openrouter": verifier, "gemini": verifier})
     r = ModelRouter(
         keys={"gemini": "k", "openrouter": "k"}, order=["gemini", "openrouter"],
-        tier_labels={"gemini": "Akira Fast", "openrouter": "Akira Balanced"},
+        tier_labels={"gemini": "Fast", "openrouter": "Balanced"},
     )
 
     f = Finding(
         scan_id="s", public_id="VLN-0001", engine=ENGINE_SECURITY,
         category="Injection", severity="critical", confidence="High",
         file="a.js", line_start=1, line_end=3, code_snippet="db.raw(x)",
-        explanation="raw sql", model_attribution="Akira Fast",
+        explanation="raw sql", model_attribution="Fast",
     )
     await verify_criticals([f], r, None)
     assert f.severity == "high"
     assert "Downgraded from Critical" in (f.explanation or "")
     # Verified by a *different* tier than the one that found it (no vendor name).
-    assert f.verified_by == "Akira Balanced"
+    assert f.verified_by == "Balanced"
 
 
 async def test_verification_confirms(monkeypatch):
@@ -139,14 +139,14 @@ async def test_verification_confirms(monkeypatch):
     _completers(monkeypatch, {"openrouter": verifier, "gemini": verifier})
     r = ModelRouter(
         keys={"gemini": "k", "openrouter": "k"}, order=["gemini", "openrouter"],
-        tier_labels={"gemini": "Akira Fast", "openrouter": "Akira Balanced"},
+        tier_labels={"gemini": "Fast", "openrouter": "Balanced"},
     )
     f = Finding(
         scan_id="s", public_id="VLN-0001", engine=ENGINE_SECURITY,
         category="Injection", severity="critical", confidence="High",
         file="a.js", line_start=1, line_end=3, code_snippet="x",
-        explanation="e", model_attribution="Akira Fast",
+        explanation="e", model_attribution="Fast",
     )
     await verify_criticals([f], r, None)
     assert f.severity == "critical"
-    assert f.verified_by == "Akira Balanced"
+    assert f.verified_by == "Balanced"

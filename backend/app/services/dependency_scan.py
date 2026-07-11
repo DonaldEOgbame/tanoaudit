@@ -334,7 +334,7 @@ async def analyze_dependencies(root: str) -> list[dict]:
         return []
     sem = asyncio.Semaphore(10)
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT, headers={"User-Agent": "Akira-DepScan"}) as client:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, headers={"User-Agent": "TanoAudit-DepScan"}) as client:
             enriched = await asyncio.gather(
                 *[_enrich(client, d, sem) for d in deps], return_exceptions=True
             )

@@ -86,12 +86,12 @@ def _tier_label_for_log(provider: str, model_id: str | None) -> str:
     
     # Fallback default mapping based on provider
     if provider == "gemini":
-        return "Akira Fast"
+        return "Fast"
     elif provider == "openrouter":
         if model_id and "sonnet" in model_id.lower():
-            return "Akira Deep"
-        return "Akira Balanced"
-    return "Akira Fast"
+            return "Deep"
+        return "Balanced"
+    return "Fast"
 
 
 async def aggregate(db: AsyncSession, user_id: str) -> dict:
@@ -143,9 +143,9 @@ async def aggregate(db: AsyncSession, user_id: str) -> dict:
     ).scalar_one()
 
     tier_limits = {
-        "Akira Fast": settings.daily_tokens_fast,
-        "Akira Balanced": settings.daily_tokens_balanced,
-        "Akira Deep": settings.daily_tokens_deep,
+        "Fast": settings.daily_tokens_fast,
+        "Balanced": settings.daily_tokens_balanced,
+        "Deep": settings.daily_tokens_deep,
     }
 
     daily_tokens_list = [

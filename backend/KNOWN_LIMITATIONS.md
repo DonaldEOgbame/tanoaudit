@@ -26,8 +26,8 @@ environmental (needs an account/key) or a deliberate, low-risk choice.
   - `MAILERSEND_API_KEY` or `SMTP_*` — real email; else logged to an outbox.
   - `MCP_API_KEY` — require bearer auth on `/mcp`.
 - 🟢 **Server-side model tiers + daily scan cap (no BYO keys).** Users pick
-  Akira-branded tiers — **Akira Fast** (Gemini Flash), **Akira Balanced**
-  (Claude Haiku), **Akira Deep** (Claude Sonnet) — exposed via `GET /scans/models`
+  TanoAudit-branded tiers — **Fast** (Gemini Flash), **Balanced**
+  (Claude Haiku), **Deep** (Claude Sonnet) — exposed via `GET /scans/models`
   as `{id,label,description}` only; the provider/model behind each tier is never
   sent to the client, and finding attribution / usage stats use the tier label,
   never the vendor (`services/model_catalog.py`, `ModelRouter.label_for`). Tier
@@ -53,8 +53,8 @@ environmental (needs an account/key) or a deliberate, low-risk choice.
 The frontend began as a pure prototype on demo globals (`window.VS_*`). Wiring it
 to the live API is underway, **foundation-first**:
 
-- ✅ **API client** (`frontend/js/api.js`, `window.AkiraAPI`): resolves the base URL
-  (`?api=` → `<meta name="akira-api">` → `http://localhost:8000/api/v1`), unwraps the
+- ✅ **API client** (`frontend/js/api.js`, `window.TanoAuditAPI`): resolves the base URL
+  (`?api=` → `<meta name="tanoaudit-api">` → `http://localhost:8000/api/v1`), unwraps the
   `{data, error}` envelope, stores the JWT pair in `localStorage`, and does a single
   transparent refresh-and-retry on 401. CORS: added `:8765`/`127.0.0.1:8765` (the
   static-server origin) to `CORS_ORIGINS` in `.env`.
@@ -68,7 +68,7 @@ to the live API is underway, **foundation-first**:
   captures the actual `File` via drag/drop or click-to-browse) and `startScan` calls
   `POST /scans` (or `/scans/upload`). The full-screen Live Scan binds to the returned
   scan id and streams `scan_started`/`file_parsed`/`scan_progress`/`finding_discovered`/
-  `scan_completed`/`scan_failed` over the WebSocket (`AkiraAPI.scans.openWS`), driving
+  `scan_completed`/`scan_failed` over the WebSocket (`TanoAuditAPI.scans.openWS`), driving
   the percentage + live finding count; Cancel sends the cancel control. With no scan id
   (the Tweaks "Run a demo scan" showcase) it falls back to the timed simulation.
   Verified end-to-end through the real frontend (headless Chrome): login → ZIP upload →
@@ -164,9 +164,9 @@ to the live API is underway, **foundation-first**:
   backend process not running orphan recovery** — restarting (maintenance loop
   polls 5s, reaps `running` >15min) self-heals it. See memory note on backend
   restart / cache-bump gotchas.
-- 🟢 **"Block PR merge on Critical" depends on GitHub branch protection.** Akira
+- 🟢 **"Block PR merge on Critical" depends on GitHub branch protection.** TanoAudit
   sets the commit status to `failure` on criticals, but that only blocks a merge
-  if the repo requires that check via branch protection — Akira can't enforce it
+  if the repo requires that check via branch protection — TanoAudit can't enforce it
   alone. The UI notes this ("Requires branch protection on the repo").
 
 ## Stub & Placeholder Detection engine (this session)
@@ -254,7 +254,7 @@ to the live API is underway, **foundation-first**:
   model. Also fixed `_loads_lenient` (strict=False + fence-stripping + first-{...}
   fallback) — the model returned JSON with a raw newline in a string that strict
   `json.loads` rejected, dropping the whole LLM batch. Regression tests added.
-  Note: SQLite single-writer means a running dev uvicorn server locks `akira.db`
+  Note: SQLite single-writer means a running dev uvicorn server locks `tanoaudit.db`
   against a concurrent CLI scan ("database is locked"); use a DB copy or stop the
   server when driving scans from a script.
 - ✅ **Attack-chain catalog scaled 12 → 56, re-keyed on CWE, tiered detection.**
@@ -353,7 +353,7 @@ to the live API is underway, **foundation-first**:
   `RUN_DETECTION_BENCHMARK=1` + real keys and asserts a recall floor
   (`DETECTION_RECALL_FLOOR`, default 70%). 🟡 *The corpus is a starter set — grow
   it toward ≥2 examples per category, and run the benchmark before/after prompt
-  changes to tell improvement from churn. Still instrumented in `akira.analysis`.*
+  changes to tell improvement from churn. Still instrumented in `tanoaudit.analysis`.*
   **First live run (gemini-flash-latest) caught a real bug** — see below.
 - ✅ **Gemini now requests JSON output mode.** The first live benchmark showed the
   model was competent (the one segment that parsed scored 100% precision) but
@@ -433,7 +433,7 @@ to the live API is underway, **foundation-first**:
   invented "current session token quota" card was removed — there's no real
   session-token concept; all numbers are now backend-sourced.
 - 🟢 **Scan profile now caps coverage for real.** The New Scan modal offers one
-  "Scan profile" (Fast/Balanced/Thorough) that sets both the engine (Akira tier)
+  "Scan profile" (Fast/Balanced/Thorough) that sets both the engine (TanoAudit tier)
   and the segment cap. `orchestrator._DEPTH_LIMITS` (120/400/800) is now applied
   to truncate segments per profile (it was previously dead code — every scan
   analyzed all segments). Surplus segments are logged, not analyzed.

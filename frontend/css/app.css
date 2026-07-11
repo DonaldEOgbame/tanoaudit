@@ -501,94 +501,59 @@ html[data-no-anim] * { transition-duration: 0s !important; transition-delay: 0s 
   background: var(--text-3);
 }
 
-/* Split Login / Auth page */
-.akl-auth-container {
-  display: grid;
-  grid-template-columns: 1fr 1.15fr;
-  width: 1040px;
-  height: 680px;
-  border-radius: var(--r-lg, 16px);
-  background: var(--bg-surface, #0f0f11);
-  overflow: hidden;
-  box-shadow: 0 24px 64px rgba(0,0,0,0.8);
-  border: 1px solid var(--border-strong, #1f1f23);
+/* Auth page */
+.ta-auth-shell {
   position: relative;
+  width: min(560px, 100%);
 }
 
-.akl-auth-left {
+.ta-auth-shell::before {
+  content: "";
+  position: absolute;
+  inset: -18px;
+  border-radius: 32px;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(16, 185, 129, 0.16), transparent 32%),
+    radial-gradient(circle at 80% 100%, rgba(20, 184, 166, 0.14), transparent 30%);
+  filter: blur(12px);
+  pointer-events: none;
+}
+
+.ta-auth-card {
   position: relative;
-  background-image: url('../samurai.webp');
-  background-size: cover;
-  background-position: center;
+  z-index: 1;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  padding: 48px;
+  gap: 12px;
+  padding: 40px 42px;
+  border-radius: 24px;
+  background:
+    linear-gradient(160deg, rgba(24, 25, 31, 0.98) 0%, rgba(15, 16, 20, 0.98) 100%);
   overflow: hidden;
-  height: 100%;
-  box-sizing: border-box;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.8);
+  border: 1px solid var(--border-strong, #1f1f23);
+  backdrop-filter: blur(10px);
 }
 
-.akl-auth-left::before {
+.ta-auth-card::before {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.95) 0%, rgba(0, 80, 60, 0.35) 55%, rgba(0, 0, 0, 0.1) 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 28%);
   pointer-events: none;
-  z-index: 1;
 }
 
-.akl-auth-left-content {
-  position: relative;
-  z-index: 2;
+.ta-auth-brand {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-
-.akl-auth-quote-jp {
-  font-size: 20px;
-  font-weight: 500;
-  line-height: 1.6;
-  color: #fff;
-  letter-spacing: 0.05em;
-  font-family: "Noto Serif JP", serif, "Hiragino Mincho ProN", sans-serif;
-  text-shadow: 0 2px 10px rgba(0,0,0,0.9);
-  border-left: 3px solid var(--accent, #00bc9f);
-  padding-left: 14px;
-}
-
-.akl-auth-quote-en {
-  font-size: 13px;
-  line-height: 1.6;
-  color: rgba(255, 255, 255, 0.7);
-  font-style: italic;
-  text-shadow: 0 2px 8px rgba(0,0,0,0.9);
-  padding-left: 17px;
-}
-
-.akl-auth-right {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 40px 48px;
-  gap: 12px;
-  background: linear-gradient(160deg, var(--bg-raised, #16161a) 0%, var(--bg-surface, #0f0f11) 100%);
-  overflow: hidden;
-  height: 100%;
-  box-sizing: border-box;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 6px;
 }
 
 @media (max-width: 800px) {
-  .akl-auth-container {
-    grid-template-columns: 1fr;
-    max-width: 440px;
-    min-height: auto;
-  }
-  .akl-auth-left {
-    display: none !important;
-  }
-  .akl-auth-right {
-    padding: 36px 24px;
+  .ta-auth-card {
+    padding: 32px 20px;
+    border-radius: 20px;
   }
 }

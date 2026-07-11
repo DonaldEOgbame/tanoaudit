@@ -1,6 +1,6 @@
 # Running a real scan
 
-This is the practical guide to running Akira against real code on your own
+This is the practical guide to running TanoAudit against real code on your own
 machine, where there are no sandbox limits (processes aren't reaped, and `git
 clone` reaches GitHub normally).
 
@@ -23,7 +23,7 @@ as `DEMO_OPENROUTER_KEY=...` (the seed/CLI default), or pass it on the CLI.
 
 > Free-tier reality: providers cap **requests per day** (Gemini free = 25/day).
 > Batching keeps a small/medium repo under that, but a large repo or repeated
-> scans will hit the provider's daily cap — that's the provider, not Akira. A
+> scans will hit the provider's daily cap — that's the provider, not TanoAudit. A
 > paid key removes it.
 
 ---
@@ -72,7 +72,7 @@ Then create a scan over HTTP (log in first to get a token):
 ```bash
 TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"demo@akira.ai","password":"demo-password-123"}' \
+  -d '{"email":"demo@tanoaudit.ai","password":"demo-password-123"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['tokens']['access_token'])")
 
 curl -s -X POST localhost:8000/api/v1/scans -H "Authorization: Bearer $TOKEN" \
@@ -105,7 +105,7 @@ minute of model time; a ~600-segment repo ≈ a few minutes.
 
 ## If a scan drops segments (`unparsed > 0`)
 
-The model truncated some batches. Akira auto-recovers (re-analyzes the missing
+The model truncated some batches. TanoAudit auto-recovers (re-analyzes the missing
 segments individually), so this should be rare. If it persists on a weak model,
 lower `ANALYSIS_BATCH_TOKENS` (e.g. 2500) so each request is smaller, or use a
 more capable model.

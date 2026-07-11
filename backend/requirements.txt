@@ -1,4 +1,4 @@
-# Akira AI backend — core dependencies
+# TanoAudit backend — core dependencies
 # Pinned to the resolved, test-passing set (Python 3.14 .venv; the 3.12 Docker
 # image installs the same versions). Bump deliberately, re-run the suite, repin.
 fastapi==0.136.3

@@ -1,4 +1,4 @@
-// Akira AI — Live Scan screen.
+// TanoAudit — Live Scan screen.
 // When given a real scanId, it streams progress from the backend WebSocket
 // (scan_progress / finding_discovered / scan_completed / scan_failed). With no
 // scanId (the Tweaks "Run a demo scan" showcase) it falls back to a timed
@@ -41,8 +41,8 @@
 
     // Fetch live fun facts from the backend; fall back silently to static list.
     useEffect(() => {
-      if (!window.AkiraAPI) return;
-      window.AkiraAPI.funFacts.get()
+      if (!window.TanoAuditAPI) return;
+      window.TanoAuditAPI.funFacts.get()
         .then((data) => {
           // Backend returns an array of strings or {fact: string} objects.
           const list = Array.isArray(data) ? data : (data && data.facts ? data.facts : null);
@@ -68,8 +68,8 @@
     // running. Resolves to the terminal outcome when there is one; otherwise calls
     // onUnresolved (still running / unknown) so the caller can decide what to do.
     function reconcile(onUnresolved) {
-      if (!scanId || !window.AkiraAPI) { if (onUnresolved) onUnresolved(); return; }
-      window.AkiraAPI.scans.get(scanId)
+      if (!scanId || !window.TanoAuditAPI) { if (onUnresolved) onUnresolved(); return; }
+      window.TanoAuditAPI.scans.get(scanId)
         .then((scan) => {
           if (terminatedRef.current || completingRef.current) return;
           if (!scan) { if (onUnresolved) onUnresolved(); return; }
@@ -95,8 +95,8 @@
 
     // --- Live mode: drive everything from the backend WebSocket. ---
     useEffect(() => {
-      if (!scanId || !window.AkiraAPI) return undefined;
-      const conn = window.AkiraAPI.scans.openWS(scanId, {
+      if (!scanId || !window.TanoAuditAPI) return undefined;
+      const conn = window.TanoAuditAPI.scans.openWS(scanId, {
         onEvent(type, payload) {
           switch (type) {
             case "scan_progress":
@@ -150,7 +150,7 @@
     // user has to refresh. Polling the scan's real DB status reconciles that the
     // same way a refresh does, so the UI always reaches its terminal state.
     useEffect(() => {
-      if (!scanId || !window.AkiraAPI) return undefined;
+      if (!scanId || !window.TanoAuditAPI) return undefined;
       const iv = setInterval(() => {
         if (terminatedRef.current || completingRef.current) return;
         reconcile(null); // unresolved (still running) is fine — just wait for the next tick
@@ -202,14 +202,14 @@
     const TICKS = 44;
     const filled = (progress / 100) * TICKS;
     const isLight = (document.documentElement.getAttribute("data-mode") === "light");
-    const logoSrc = isLight ? "lightmode-logo.svg" : "logo.svg";
+    const logoSrc = isLight ? "lightmode-logo.svg?v=3" : "logo.svg?v=3";
 
     return h("div", { className: "scan-stage", style: { background: "var(--bg-app)" }, "data-screen-label": "Live Scan" },
       completing && h("div", { className: "scan-complete-flash" }),
 
       // Minimal top bar
       h("div", { style: { position: "relative", zIndex: 2, display: "flex", alignItems: "center", gap: 12, padding: "12px 24px" } },
-        h("img", { src: logoSrc, style: { height: 48, width: "auto", objectFit: "contain" }, alt: "Akira AI" }),
+        h("img", { src: logoSrc, style: { height: 48, width: "auto", objectFit: "contain" }, alt: "TanoAudit" }),
         h("span", { className: "pulse-dot", style: { width: 8, height: 8, borderRadius: "50%", background: "var(--accent)" } }),
         h("div", { style: { fontSize: 13, color: "var(--text-2)" } }, "Scanning ", h("span", { className: "mono", style: { color: "var(--accent)" } }, repo || "user/ecommerce-api")),
         h("div", { style: { flex: 1 } }),

@@ -8,7 +8,7 @@ async def test_get_and_update_profile(auth):
     client, headers, _ = auth
     r = await client.get(f"{PREFIX}/profile", headers=headers)
     assert r.status_code == 200
-    assert r.json()["data"]["email"] == "demo@akira.ai"
+    assert r.json()["data"]["email"] == "demo@tanoaudit.ai"
 
     r = await client.patch(
         f"{PREFIX}/profile",
@@ -33,7 +33,7 @@ async def test_change_password(auth):
     # Old password no longer works.
     r2 = await client.post(
         f"{PREFIX}/auth/login",
-        json={"email": "demo@akira.ai", "password": "supersecret123"},
+        json={"email": "demo@tanoaudit.ai", "password": "supersecret123"},
     )
     assert r2.status_code == 401
 
@@ -61,14 +61,14 @@ async def test_totp_enroll_verify_and_login(auth):
     # Login now requires a TOTP code.
     r = await client.post(
         f"{PREFIX}/auth/login",
-        json={"email": "demo@akira.ai", "password": "supersecret123"},
+        json={"email": "demo@tanoaudit.ai", "password": "supersecret123"},
     )
     assert r.json()["data"]["totp_required"] is True
 
     r = await client.post(
         f"{PREFIX}/auth/login",
         json={
-            "email": "demo@akira.ai",
+            "email": "demo@tanoaudit.ai",
             "password": "supersecret123",
             "totp_code": pyotp.TOTP(secret).now(),
         },

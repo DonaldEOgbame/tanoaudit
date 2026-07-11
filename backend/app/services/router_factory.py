@@ -1,10 +1,10 @@
-"""Build a ModelRouter from the SERVER's provider keys + the scan's Akira tiers.
+"""Build a ModelRouter from the SERVER's provider keys + the scan's TanoAudit tiers.
 
 Users never provide keys: the app holds one key per provider (config.Settings).
-A scan/chat selects Akira-branded tiers (e.g. "akira_deep"); each tier maps to a
+A scan/chat selects TanoAudit-branded tiers (e.g. "tanoaudit_deep"); each tier maps to a
 hidden provider + concrete model id via `model_catalog`. The router runs in terms
 of providers (fallback/cooldown), using the concrete model id chosen per provider
-for this request, and labels attribution with the Akira tier name (never a vendor).
+for this request, and labels attribution with the TanoAudit tier name (never a vendor).
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def _plan_from_tiers(tier_ids: list[str]) -> tuple[list[str], dict[str, str], di
         if tier.provider not in order:
             order.append(tier.provider)
     # Keep Gemini wired as an automatic last-resort fallback even though no tier
-    # maps to it anymore: every Akira tier now runs OpenRouter's free model, and
+    # maps to it anymore: every TanoAudit tier now runs OpenRouter's free model, and
     # free models rate-limit hard — Gemini catches those storms so scans don't
     # stall. Vendor stays hidden: a Gemini fallback is attributed to the primary
     # tier's label (the call uses the per-provider default GEMINI_MODEL).

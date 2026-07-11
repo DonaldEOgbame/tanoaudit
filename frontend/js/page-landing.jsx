@@ -1,4 +1,4 @@
-// Akira AI — Public marketing site (Resend-inspired dark theme).
+// TanoAudit — Public marketing site (Resend-inspired dark theme).
 // Exposes window.LandingPage. Hash-routed public pages (#/features, #/how-it-works,
 // #/docs, #/resources) — all client-side, shareable, no backend involvement.
 // `onGetStarted` / `onLogin` advance to the auth screen.
@@ -7,7 +7,7 @@
   const { useEffect, useRef, useState } = React;
   const h = React.createElement;
 
-  // Public pages reachable from the nav/footer. Anything Akira doesn't actually
+  // Public pages reachable from the nav/footer. Anything TanoAudit doesn't actually
   // offer (pricing, CLI, SDKs) is intentionally omitted.
   const NAV = [
     ["Features", "#/features"],
@@ -48,7 +48,7 @@
         h("a", {
           className: "akl-brand", href: "#/",
           onClick: (e) => { e.preventDefault(); go("#/"); },
-        }, h("img", { src: "logo.svg", alt: "Akira AI", className: "akl-brand-logo" })),
+        }, h("img", { src: "logo.svg?v=3", alt: "TanoAudit", className: "akl-brand-logo" })),
         h("nav", { className: "akl-nav-links" },
           NAV.map(([label, hash]) => h("a", {
             key: hash, href: hash, className: "akl-nav-link",
@@ -73,7 +73,7 @@
     return h("footer", { className: "akl-footer" },
       h("div", { className: "akl-footer-cols" },
         h("div", { className: "akl-footer-brand" },
-          h("img", { src: "logo.svg", alt: "Akira AI", className: "akl-brand-logo" }),
+          h("img", { src: "logo.svg?v=3", alt: "TanoAudit", className: "akl-brand-logo" }),
           h("p", { className: "akl-footer-tag" }, "AI security scanning for modern engineering teams."),
         ),
         cols.map(([head, links]) =>
@@ -86,7 +86,7 @@
           )),
       ),
       h("div", { className: "akl-footer-bar" },
-        h("span", { className: "akl-footer-copy" }, "© " + new Date().getFullYear() + " Akira AI. All rights reserved."),
+        h("span", { className: "akl-footer-copy" }, "© " + new Date().getFullYear() + " TanoAudit. All rights reserved."),
         h("div", { className: "akl-footer-social" },
           ["GitHub", "X", "LinkedIn"].map((s) => h("a", { key: s, href: "#", className: "akl-footer-link" }, s)),
         ),
@@ -223,7 +223,7 @@
 
     return h("section", { className: "akl-logos" },
       h("p", { className: "akl-logos-label" },
-        "Security teams of all sizes trust Akira", h("br"),
+        "Security teams of all sizes trust TanoAudit", h("br"),
         "to scan their most important code.",
       ),
       h("div", { className: "akl-logos-grid" },
@@ -247,7 +247,7 @@
   }
 
   // Mirrors Resend's "Integrate this weekend": centered gradient headline + lead,
-  // a row of integration-target chips, then a large visual panel. Akira's real
+  // a row of integration-target chips, then a large visual panel. TanoAudit's real
   // model is connect-a-GitHub-repo or upload-a-ZIP, then scan from the dashboard —
   // so the chips name real entry points and the panel is a blank placeholder.
   function IntegrateBand() {
@@ -375,7 +375,7 @@
       h("section", { className: "akl-hero" },
         h("div", { className: "akl-hero-copy" },
           h("button", { className: "akl-announce", onClick: onGetStarted },
-            "Introducing Akira deep scans", h("span", { className: "akl-announce-arrow" }, " ›"),
+            "Introducing TanoAudit deep scans", h("span", { className: "akl-announce-arrow" }, " ›"),
           ),
           h("h1", { className: "akl-hero-title" }, "Security", h("br"), "for developers"),
           h("p", { className: "akl-hero-sub" },
@@ -394,7 +394,7 @@
         h("div", { className: "akl-hero-spline" },
           h("iframe", {
             src: "https://my.spline.design/glassknotvortex-AM7Mgo2SDGKDYnPbqzsw8zdH/",
-            title: "Akira hero visual",
+            title: "TanoAudit hero visual",
             frameBorder: "0",
             loading: "lazy",
             allow: "autoplay; fullscreen",
@@ -414,13 +414,13 @@
       h(SectionHeading, {
         title: ["Reviews code like", h("br", { key: "br" }), "a senior engineer"],
         lead: h(React.Fragment, null,
-          "Akira doesn't pattern-match — it reads your code in context, tracing taint flows,", h("br"),
+          "TanoAudit doesn't pattern-match — it reads your code in context, tracing taint flows,", h("br"),
           "auth gaps, and injection paths across files the way a human reviewer would.",
         ),
       }),
 
       // ---- Two-up cards (Resend "Test mode" + "Modular webhooks") ----
-      // Visuals are blank placeholders; copy describes only real Akira capabilities.
+      // Visuals are blank placeholders; copy describes only real TanoAudit capabilities.
       h(TwoUpCards, { items: [
         {
           icon: "◷", title: "Live scan streaming",
@@ -439,7 +439,7 @@
         h(Placeholder, { label: "Section icon", className: "akl-ph-orb" }),
         h("h2", { className: "akl-big-heading akl-center-h2" }, "Findings you can actually trust"),
         h("p", { className: "akl-lead akl-center-lead" },
-          "A report that's easy for anyone to triage. Akira ranks every issue by", h("br"),
+          "A report that's easy for anyone to triage. TanoAudit ranks every issue by", h("br"),
           "exploitability, dedupes the noise, and explains the blast radius.",
         ),
         h(Placeholder, { label: "Report visual", className: "akl-ph-editor-wide" }),
@@ -449,7 +449,7 @@
       h(SectionHeading, {
         title: "More than a linter",
         lead: h(React.Fragment, null,
-          "Akira goes past static rules — it audits your dependencies for known", h("br"),
+          "TanoAudit goes past static rules — it audits your dependencies for known", h("br"),
           "vulnerabilities and tracks how your security posture trends over time.",
         ),
       }),
@@ -481,7 +481,7 @@
       h(PageHead, {
         kicker: "Features",
         title: "Everything you need to ship secure code",
-        lead: "Akira combines AI code analysis, dependency auditing, and concrete fix plans into one workflow that lives in your pipeline.",
+        lead: "TanoAudit combines AI code analysis, dependency auditing, and concrete fix plans into one workflow that lives in your pipeline.",
       }),
       h("div", { className: "akl-pagebody" },
         h(Placeholder, { label: "Product screenshot", height: 420, className: "akl-ph-wide" }),
@@ -494,7 +494,7 @@
       h(TwoUpCards, { items: [
         {
           icon: "🧠", title: "AI code analysis",
-          body: "Akira reads your code like a senior reviewer — tracing taint flows, auth gaps, and injection paths across files.",
+          body: "TanoAudit reads your code like a senior reviewer — tracing taint flows, auth gaps, and injection paths across files.",
           visual: h(Placeholder, { label: "Analysis flow", height: 200 }),
         },
         {
@@ -510,7 +510,7 @@
   // ---- How it works page -------------------------------------------------------
   function HowItWorksPage({ onGetStarted }) {
     const steps = [
-      ["01", "Connect your repository", "Link a GitHub repo (or upload a project). Akira clones, indexes, and prepares it for analysis."],
+      ["01", "Connect your repository", "Link a GitHub repo (or upload a project). TanoAudit clones, indexes, and prepares it for analysis."],
       ["02", "Run a scan", "Kick off a deep scan from the dashboard. Watch it progress file-by-file in real time."],
       ["03", "Triage real findings", "Issues arrive ranked by exploitability, deduped, and explained — not a wall of noise."],
       ["04", "Apply the fix", "Each finding ships with a reviewed remediation and an applyable diff you can turn into a PR."],
@@ -519,7 +519,7 @@
       h(PageHead, {
         kicker: "How it works",
         title: "From repository to remediation in four steps",
-        lead: "Akira fits the way your team already works — connect, scan, triage, and fix without leaving your flow.",
+        lead: "TanoAudit fits the way your team already works — connect, scan, triage, and fix without leaving your flow.",
       }),
       h("section", { className: "akl-steps" },
         steps.map(([num, title, body], i) =>
@@ -542,7 +542,7 @@
       ["Getting started", "Create an account, connect a repository, and run your first scan in minutes."],
       ["Scans", "How scans are scoped, what depth modes mean, and how to read a scan report."],
       ["Findings & severities", "Understand severity levels, confidence, CWE/OWASP references, and dedup logic."],
-      ["Fix plans", "How Akira generates remediations and how to apply a suggested diff."],
+      ["Fix plans", "How TanoAudit generates remediations and how to apply a suggested diff."],
       ["GitHub integration", "Connect GitHub, sign in with GitHub, enable PR status checks and auto-scans."],
       ["Account & security", "Profile, sessions, two-factor authentication, and data settings."],
     ];
@@ -550,7 +550,7 @@
       h(PageHead, {
         kicker: "Documentation",
         title: "Docs",
-        lead: "Guides and reference for getting the most out of Akira. This section is being filled out — start with the basics below.",
+        lead: "Guides and reference for getting the most out of TanoAudit. This section is being filled out — start with the basics below.",
       }),
       h("section", { className: "akl-doclist" },
         sections.map(([title, body], i) =>
@@ -567,7 +567,7 @@
   function ResourcesPage() {
     const cards = [
       ["Blog", "Engineering notes, security write-ups, and product updates."],
-      ["Changelog", "What's new in Akira, release by release."],
+      ["Changelog", "What's new in TanoAudit, release by release."],
       ["Security", "How we handle your code and data, and our disclosure policy."],
       ["About", "Why we're building AI-native security tooling for developers."],
     ];
@@ -575,7 +575,7 @@
       h(PageHead, {
         kicker: "Resources",
         title: "Resources",
-        lead: "Reading, updates, and background on Akira. More to come — placeholders mark what's on the way.",
+        lead: "Reading, updates, and background on TanoAudit. More to come — placeholders mark what's on the way.",
       }),
       h("section", { className: "akl-grid-section akl-grid-tight" },
         h("div", { className: "akl-grid akl-grid-2" },

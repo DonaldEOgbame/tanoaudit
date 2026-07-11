@@ -19,9 +19,9 @@
     }, []);
 
     if (collapsed) {
-      return h("img", { src: "logo-collapsed.svg", style: { width: 80, height: 80, objectFit: "contain", flexShrink: 0 }, alt: "Akira AI Icon" });
+      return h("img", { src: "logo-collapsed.svg?v=3", style: { width: 80, height: 80, objectFit: "contain", flexShrink: 0 }, alt: "TanoAudit Icon" });
     }
-    return h("img", { src: isLight ? "lightmode-logo.svg" : "logo.svg", style: { height: 54, width: "auto", maxWidth: 200, objectFit: "contain" }, alt: "Akira AI" });
+    return h("img", { src: isLight ? "lightmode-logo.svg?v=3" : "logo.svg?v=3", style: { height: 54, width: "auto", maxWidth: 200, objectFit: "contain" }, alt: "TanoAudit" });
   }
   window.Logo = Logo;
 
@@ -141,8 +141,8 @@
     const [confirmDel, setConfirmDel] = useState(null);
 
     function loadScans() {
-      if (!window.AkiraAPI) { setScans(window.VS_SCANS || []); return; }
-      window.AkiraAPI.scans.list({ limit: 8 })
+      if (!window.TanoAuditAPI) { setScans(window.VS_SCANS || []); return; }
+      window.TanoAuditAPI.scans.list({ limit: 8 })
         .then((res) => {
           const items = (res && res.items) || [];
           setScans(items.map((s) => ({
@@ -163,13 +163,13 @@
       setMenuFor(null);
       const next = !s.pinned;
       setScans((arr) => arr.map((x) => x.id === s.id ? { ...x, pinned: next } : x));
-      if (window.AkiraAPI) window.AkiraAPI.scans.setPinned(s.id, next).then(loadScans).catch(loadScans);
+      if (window.TanoAuditAPI) window.TanoAuditAPI.scans.setPinned(s.id, next).then(loadScans).catch(loadScans);
     }
     function renameScan(s, name) {
       setRenameFor(null);
       const clean = (name || "").trim();
       setScans((arr) => arr.map((x) => x.id === s.id ? { ...x, displayName: clean } : x));
-      if (window.AkiraAPI) window.AkiraAPI.scans.rename(s.id, clean).catch(loadScans);
+      if (window.TanoAuditAPI) window.TanoAuditAPI.scans.rename(s.id, clean).catch(loadScans);
     }
     function deleteScan(s) {
       setMenuFor(null);
@@ -180,13 +180,13 @@
       setConfirmDel(null);
       if (!s) return;
       setScans((arr) => arr.filter((x) => x.id !== s.id));
-      if (window.AkiraAPI) window.AkiraAPI.scans.remove(s.id).then(loadScans).catch(loadScans);
+      if (window.TanoAuditAPI) window.TanoAuditAPI.scans.remove(s.id).then(loadScans).catch(loadScans);
     }
     // Create-or-reuse a read-only share link and copy it to the clipboard
     // (same flow as the report page's Share popover).
     function shareScan(s) {
       setMenuFor(null);
-      const API = window.AkiraAPI;
+      const API = window.TanoAuditAPI;
       if (!API) { toast({ kind: "info", msg: "Sharing isn't available in preview mode." }); return; }
       const toLink = (r) => {
         if (!r) return "";
@@ -214,7 +214,7 @@
     const [meta, setMeta] = useState({ alerts: 0, customCount: null, ghConnected: false });
 
     function reloadMeta() {
-      const API = window.AkiraAPI;
+      const API = window.TanoAuditAPI;
       if (!API) return;
       Promise.allSettled([API.watchlist.alerts(), API.customVulns.list(), API.github.status()])
         .then(([al, cv, gh]) => {
@@ -231,16 +231,16 @@
 
     useEffect(() => {
       reloadMeta();
-      window.addEventListener("akira:custom-vulns-changed", reloadMeta);
+      window.addEventListener("tanoaudit:custom-vulns-changed", reloadMeta);
       return () => {
-        window.removeEventListener("akira:custom-vulns-changed", reloadMeta);
+        window.removeEventListener("tanoaudit:custom-vulns-changed", reloadMeta);
       };
     }, []);
 
     // Resolve each NAV row's badge/count/status from live data (falls back to
     // the static prototype values only when no API is present).
     function navMeta(n) {
-      if (!window.AkiraAPI) return { badge: n.badge, count: n.count, status: n.status };
+      if (!window.TanoAuditAPI) return { badge: n.badge, count: n.count, status: n.status };
       if (n.page === "watchlist") return { badge: meta.alerts > 0 ? ("↑" + meta.alerts) : null };
       if (n.page === "custom") return { count: meta.customCount };
       if (n.page === "integrations") return { status: meta.ghConnected };
@@ -397,8 +397,8 @@
     useEffect(() => { inputRef.current && inputRef.current.focus(); }, []);
     // Real scans become "jump to report" commands.
     useEffect(() => {
-      if (!window.AkiraAPI) return;
-      window.AkiraAPI.scans.list({ limit: 20 })
+      if (!window.TanoAuditAPI) return;
+      window.TanoAuditAPI.scans.list({ limit: 20 })
         .then((res) => setScanCmds(((res && res.items) || []).map((s) => ({
           type: "Scan", label: s.repo || s.source_url || "scan",
           hint: s.status === "completed" ? "score " + (s.security_score != null ? s.security_score : "—") : (s.status || ""),

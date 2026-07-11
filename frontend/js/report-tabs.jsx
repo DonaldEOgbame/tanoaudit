@@ -139,7 +139,7 @@
 
   // ============ DEPENDENCIES ============
   function DepsTab({ meta }) {
-    const API = window.AkiraAPI;
+    const API = window.TanoAuditAPI;
     const scanId = meta && meta.id;
     const DASH = "—";
     // Real dependency inventory from GET /scans/{id}/dependencies; falls back to
@@ -225,7 +225,7 @@
   // Each path links its constituent findings by public id; clicking one jumps to
   // the Vulnerabilities tab focused on that finding's file.
   function AttackPathsTab({ meta, findings, setTab, setSelFile, nav }) {
-    const API = window.AkiraAPI;
+    const API = window.TanoAuditAPI;
     const scanId = meta && meta.id;
     const [state, setState] = useState({ loading: !!(scanId && API), error: null, paths: null });
     useEffect(() => {
@@ -337,7 +337,7 @@
 
   // ============ AI-GEN ANALYSIS ============
   function AiGenTab({ meta }) {
-    const API = window.AkiraAPI;
+    const API = window.TanoAuditAPI;
     const scanId = meta && meta.id;
     // Real AI-generation composition from GET /scans/{id}/ai-generation, derived
     // from this scan's findings. Falls back to the demo when there's no scan.
@@ -427,7 +427,7 @@
   // history list. The diff (what's new/fixed/still-open) columns were removed —
   // the diff endpoint still exists, but this tab is now just trend + history.
   function HistoryTab({ meta }) {
-    const API = window.AkiraAPI;
+    const API = window.TanoAuditAPI;
     const repo = meta && meta.repo;
     const curId = meta && meta.id;
 

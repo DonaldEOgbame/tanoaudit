@@ -16,7 +16,7 @@ class ScanCreate(BaseModel):
     branch: Optional[str] = None
     depth: Literal["fast", "deep", "thorough"] = "deep"
     model_mode: Literal["auto", "manual"] = "auto"
-    # Akira model tier ids (see services/model_catalog.py). Unknown ids are
+    # TanoAudit model tier ids (see services/model_catalog.py). Unknown ids are
     # ignored at resolve time; "auto" mode uses the default tier regardless.
     models: list[str] = Field(default_factory=lambda: [DEFAULT_TIER])
     include_custom: bool = True

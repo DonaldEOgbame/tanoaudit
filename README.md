@@ -1,4 +1,4 @@
-# Akira AI
+# TanoAudit
 
 A unified, AI-powered codebase **security audit + optimization** platform. One scan runs two engines at once — a security engine (187 vulnerability classes across 20 categories) and an optimization engine (performance, code quality, scalability, dependencies) — and surfaces the results in a Claude.ai-style shell: sidebar navigation + history on the left, dashboards / reports / scan flows in the main area.
 

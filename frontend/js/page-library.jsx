@@ -1,12 +1,12 @@
 // VaultScan — Custom Vulnerabilities, Optimization Plans, Watchlist, Reports
-// Wired to the live backend through window.AkiraAPI (Agent C / Vault).
+// Wired to the live backend through window.TanoAuditAPI (Agent C / Vault).
 (function () {
   const React = window.React;
   const { useState, useEffect, useRef, useCallback } = React;
   const h = React.createElement;
   const Icons = window.Icons;
   const { SevBadge, SevDot, Switch, Ring, Tag, Modal, scoreColor, ProgressBar, Dropdown } = window;
-  const API = window.AkiraAPI;
+  const API = window.TanoAuditAPI;
 
   // One labelled section of a research result: small uppercase heading + body.
   // Returns null when there's no content so empty sections are skipped.
@@ -72,7 +72,7 @@
       try {
         const rows = await API.customVulns.list();
         setVulns(rows || []);
-        window.dispatchEvent(new Event("akira:custom-vulns-changed"));
+        window.dispatchEvent(new Event("tanoaudit:custom-vulns-changed"));
       } catch (e) {
         setError(errMsg(e));
       } finally {
@@ -101,7 +101,7 @@
         await API.customVulns.remove(v.id);
         setVulns((vs) => vs.filter((x) => x.id !== v.id));
         toast({ kind: "info", msg: "Rule deleted" });
-        window.dispatchEvent(new Event("akira:custom-vulns-changed"));
+        window.dispatchEvent(new Event("tanoaudit:custom-vulns-changed"));
       } catch (e) {
         toast({ kind: "error", msg: errMsg(e) });
         setBusy((b) => Object.assign({}, b, { [v.id]: false }));
@@ -130,7 +130,7 @@
           vulns.length === 0 && h("div", { className: "empty-state" },
             h("div", { className: "es-icon" }, h(Icons.bug, { size: 24 })),
             h("h3", null, "No custom rules yet"),
-            h("p", null, "Describe a vulnerability unique to your stack and Akira AI will research it and add it to every scan.")))),
+            h("p", null, "Describe a vulnerability unique to your stack and TanoAudit will research it and add it to every scan.")))),
       adding && h(AddVulnModal, { toast, onClose: () => setAdding(false), onSaved: () => { setAdding(false); load(); } }),
       editing && h(AddVulnModal, { toast, vuln: editing, onClose: () => setEditing(null), onSaved: () => { setEditing(null); load(); } }),
       viewing && h(AddVulnModal, { toast, vuln: viewing, initialPhase: "result", onClose: () => setViewing(null), onSaved: () => { setViewing(null); load(); } }));

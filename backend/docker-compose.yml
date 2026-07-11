@@ -15,9 +15,9 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: akira
-      POSTGRES_PASSWORD: akira
-      POSTGRES_DB: akira
+      POSTGRES_USER: tanoaudit
+      POSTGRES_PASSWORD: tanoaudit
+      POSTGRES_DB: tanoaudit
     ports:
       - "5432:5432"
     volumes:

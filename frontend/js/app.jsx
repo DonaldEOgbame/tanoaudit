@@ -62,9 +62,9 @@
     const demoState = demoOverride || t.demoState;
 
     useEffect(() => {
-      if (!user || !window.AkiraAPI) return;
+      if (!user || !window.TanoAuditAPI) return;
       let alive = true;
-      window.AkiraAPI.notifications.unreadCount()
+      window.TanoAuditAPI.notifications.unreadCount()
         .then((res) => {
           if (!alive) return;
           const count = res && typeof res.count === "number" ? res.count : (typeof res === "number" ? res : 0);
@@ -123,7 +123,7 @@
     // Kick off a real scan: POST /scans (or upload for ZIP), then take over with
     // the live screen bound to the returned scan id.
     async function startScan(config) {
-      const API = window.AkiraAPI;
+      const API = window.TanoAuditAPI;
       const label = config.repo || config.source_url || config.fileName || "your project";
       try {
         let scan;
@@ -168,7 +168,7 @@
         repo: scanRepo, scanId: activeScanId, speed: t.scanSpeed,
         onComplete: onScanComplete, onError: onScanError,
         onCancel: () => {
-          if (activeScanId) { try { window.AkiraAPI.scans.control(activeScanId, "cancel"); } catch (e) {} }
+          if (activeScanId) { try { window.TanoAuditAPI.scans.control(activeScanId, "cancel"); } catch (e) {} }
           setScanning(false); setActiveScanId(null);
           toast({ kind: "info", msg: "Scan cancelled" });
         },
@@ -195,7 +195,7 @@
       h("div", { className: "vs-main" },
         // top bar
         h("div", { className: "vs-topbar" },
-          h("span", { style: { fontSize: 13.5, fontWeight: 600 } }, titles[page] || "Akira AI"),
+          h("span", { style: { fontSize: 13.5, fontWeight: 600 } }, titles[page] || "TanoAudit"),
           page === "report" && h("span", { className: "badge", style: { background: "var(--bg-active)", color: "var(--text-2)" } }, scanId ? scanRepo : "user/ecommerce-api"),
           h("div", { style: { flex: 1 } }),
           h("button", { className: "icon-btn", "data-tip": "Search (⌘K)", onClick: () => setCmdOpen(true) }, h(Icons.search, { size: 16 })),
@@ -254,7 +254,7 @@
   }
 
   function Gate() {
-    const API = window.AkiraAPI;
+    const API = window.TanoAuditAPI;
     // Pick up any tokens / error the GitHub sign-in redirect left in the URL
     // before we decide the initial status. Runs once at module eval per mount.
     const redirect = useRef(API ? API.auth.consumeAuthRedirect() : null).current;

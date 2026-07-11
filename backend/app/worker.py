@@ -43,7 +43,7 @@ from app.services.orchestrator import run_scan
 from app.services.repositories import _next_run
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("akira.worker")
+logger = logging.getLogger("tanoaudit.worker")
 
 POLL_SECONDS = 5
 CLAIM_BATCH = 10
@@ -234,7 +234,7 @@ async def run_maintenance_loop(stop: asyncio.Event | None = None) -> None:
     are never lost to a process boundary. `stop` lets the lifespan cancel it
     cleanly on shutdown.
     """
-    logger.info("Akira maintenance loop started (poll every %ss)", POLL_SECONDS)
+    logger.info("TanoAudit maintenance loop started (poll every %ss)", POLL_SECONDS)
     state: dict = {}
     while stop is None or not stop.is_set():
         try:

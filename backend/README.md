@@ -1,6 +1,6 @@
-# Akira AI — Backend
+# TanoAudit — Backend
 
-FastAPI (async) backend for the Akira AI codebase security audit & optimization
+FastAPI (async) backend for the TanoAudit codebase security audit & optimization
 platform. This is a **single-user** product: one user, their scans, findings,
 and settings — no teams, roles, or billing.
 
@@ -18,7 +18,7 @@ and settings — no teams, roles, or billing.
 > was redesigned into a rich Q&A explainer with curated external resource links.
 > The rest of the frontend remains mock-driven (see KNOWN_LIMITATIONS.md).
 >
-> **Quick demo:** `python -m app.seed` creates a demo user (`demo@akira.ai` /
+> **Quick demo:** `python -m app.seed` creates a demo user (`demo@tanoaudit.ai` /
 > `demo-password-123`) with a realistic completed scan of `user/ecommerce-api`
 > (15 findings, 4 Critical), provider keys, an optimization plan, a watched repo,
 > and all reference data.
@@ -100,7 +100,7 @@ pytest            # uses in-memory SQLite; no external services needed
 docker compose up --build   # api + postgres + worker
 ```
 
-Set `DATABASE_URL=postgresql+asyncpg://akira:akira@postgres:5432/akira` in `.env`
+Set `DATABASE_URL=postgresql+asyncpg://cad:cad@postgres:5432/cad` in `.env`
 for the compose Postgres. The stack needs no Redis: the event bus is in-memory,
 scans run via the polling `worker` service (and in-process BackgroundTasks), and
 rate limiting uses an in-memory window.

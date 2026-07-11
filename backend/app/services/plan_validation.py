@@ -22,8 +22,8 @@ APPROVED = "approved"
 ISSUES_FOUND = "issues_found"
 ERROR = "error"
 
-_PROMPT = """You are validating optimization goals for a security scanner called Akira.
-Akira scans source code and detects: vulnerabilities (SQLi, XSS, IDOR, path traversal, etc.),
+_PROMPT = """You are validating optimization goals for a security scanner called TanoAudit.
+TanoAudit scans source code and detects: vulnerabilities (SQLi, XSS, IDOR, path traversal, etc.),
 exposed secrets and hardcoded credentials, outdated/CVE-affected dependencies, and insecure
 coding patterns. It does NOT run tests, measure latency or performance, check CI/CD pipelines,
 assess test coverage, or execute benchmarks.
@@ -92,7 +92,7 @@ async def validate_goals(goals: list[str], context: str, router: ModelRouter) ->
         if "coverage" in g_lower:
             heuristic_issues.append({
                 "goal_index": idx,
-                "problem": "Test/code coverage requires a test runner or coverage tool, which is outside Akira's static security scanning capabilities.",
+                "problem": "Test/code coverage requires a test runner or coverage tool, which is outside TanoAudit's static security scanning capabilities.",
                 "suggestion": "Focus on scan-measurable security objectives, such as fixing authentication or dependency findings."
             })
         elif any(k in g_lower for k in ("latency", "response time", "throughput", "p95", "p99")):
@@ -104,7 +104,7 @@ async def validate_goals(goals: list[str], context: str, router: ModelRouter) ->
         elif any(k in g_lower for k in ("ci/cd", "pipeline")):
             heuristic_issues.append({
                 "goal_index": idx,
-                "problem": "CI/CD pipeline state or setup requires checking runner configurations, which is outside Akira's scan findings.",
+                "problem": "CI/CD pipeline state or setup requires checking runner configurations, which is outside TanoAudit's scan findings.",
                 "suggestion": "Focus on scan-measurable vulnerabilities in source code."
             })
         elif "n+1" in g_lower:
@@ -126,22 +126,16 @@ async def validate_goals(goals: list[str], context: str, router: ModelRouter) ->
 
     # 2. Call AI validator for remaining goals
     if not router.has_any_key():
-        if heuristic_issues:
-            return {"status": "issues", "issues": heuristic_issues}
         return {"status": "error", "error": "AI validation is unavailable right now. Try again later."}
 
     goal_lines = "\n".join(f"{i}. {g}" for i, g in enumerate(goals))
     try:
         raw = await router.complete(_PROMPT.format(context=context[:1500], goals=goal_lines))
     except Exception:  # noqa: BLE001
-        if heuristic_issues:
-            return {"status": "issues", "issues": heuristic_issues}
         return {"status": "error", "error": "Couldn't reach the validation model. Try again."}
 
     result = _parse(raw)
     if result is None:
-        if heuristic_issues:
-            return {"status": "issues", "issues": heuristic_issues}
         return {"status": "error", "error": "The validation model returned an unreadable response. Try again."}
 
     # 3. Merge AI results with heuristic results

@@ -1,22 +1,22 @@
-// Akira AI — frontend API client.
+// TanoAudit — frontend API client.
 // Talks to the FastAPI backend. Loaded as plain JS (before the JSX scripts) and
-// exposed as window.AkiraAPI. Handles the {data, error} envelope, JWT storage,
+// exposed as window.TanoAuditAPI. Handles the {data, error} envelope, JWT storage,
 // and transparent access-token refresh on 401.
 (function () {
-  // Base URL: ?api= override, then <meta name="akira-api">, then default.
+  // Base URL: ?api= override, then <meta name="tanoaudit-api">, then default.
   function resolveBase() {
     try {
       const q = new URLSearchParams(window.location.search).get("api");
       if (q) return q.replace(/\/$/, "");
     } catch (e) { /* ignore */ }
-    const meta = document.querySelector('meta[name="akira-api"]');
+    const meta = document.querySelector('meta[name="tanoaudit-api"]');
     if (meta && meta.content) return meta.content.replace(/\/$/, "");
     return "http://localhost:8000/api/v1";
   }
 
   const BASE = resolveBase();
-  const ACCESS_KEY = "akira.access";
-  const REFRESH_KEY = "akira.refresh";
+  const ACCESS_KEY = "tanoaudit.access";
+  const REFRESH_KEY = "tanoaudit.refresh";
 
   // --- token store ---------------------------------------------------------
   const tokens = {
@@ -299,7 +299,7 @@
       const q = new URLSearchParams(params || {}).toString();
       return get("/scans" + (q ? "?" + q : ""));
     },
-    // Akira model tiers for the selector: { tiers:[{id,label,description}], default }.
+    // TanoAudit model tiers for the selector: { tiers:[{id,label,description}], default }.
     models() { return get("/scans/models"); },
     // Rolling-24h scan usage vs cap: { used, limit, remaining, resets_in_seconds }.
     limit() { return get("/scans/limit"); },
@@ -388,7 +388,7 @@
     history(scanId) { return get("/scans/" + scanId + "/chat"); },     // info + counters
     // SSE stream: onEvent receives { delta } chunks then { done: true }.
     // Returns { promise, abort() }. Mirrors findings.generateFix.
-    // `tier` is an optional Akira model tier id (from scans.models()).
+    // `tier` is an optional TanoAudit model tier id (from scans.models()).
     send(scanId, message, messages, onEvent, tier, attackPathsContext) {
       const body = { message, messages: messages || [], tier: tier || null };
       if (attackPathsContext) body.attack_paths_context = attackPathsContext;
@@ -468,7 +468,7 @@
   const usage = { get() { return get("/usage"); } };
 
   // --- settings (model preference, privacy) ---------------------------------
-  // No API keys: the server holds provider keys; users pick Akira model tiers.
+  // No API keys: the server holds provider keys; users pick TanoAudit model tiers.
   const settings = {
     getModels() { return get("/settings/models"); },          // { default_tier }
     putModels(body) { return request("/settings/models", { method: "PUT", body }); },
@@ -505,7 +505,7 @@
   // the whole set, not just the default batch of 20.
   const funFacts = { get(count) { return get("/fun-facts?count=" + (count || 100)); } };
 
-  window.AkiraAPI = {
+  window.TanoAuditAPI = {
     BASE, ApiError,
     request, get, post, patch, del, stream,
     auth, scans, profile, findings, reports, chat, customVulns, plans,

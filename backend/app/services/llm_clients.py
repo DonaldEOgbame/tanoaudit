@@ -49,12 +49,12 @@ DEFAULT_MODELS = {
 }
 
 # Neutral, vendor-free labels for any place a provider id would otherwise be
-# shown to a user (e.g. usage stats). Finding attribution uses the per-scan Akira
+# shown to a user (e.g. usage stats). Finding attribution uses the per-scan TanoAudit
 # tier label via ModelRouter.label_for; this is the fallback for aggregate views
 # that only know the provider. The vendor name is deliberately never surfaced.
 PROVIDER_LABELS = {
-    "gemini": "Akira Fast",
-    "openrouter": "Akira (Balanced/Deep)",
+    "gemini": "Fast",
+    "openrouter": "Balanced/Deep",
 }
 
 
@@ -156,7 +156,7 @@ async def complete_openrouter(
     return await _openai_style(
         "openrouter", "https://openrouter.ai/api/v1", key, prompt,
         model or DEFAULT_MODELS["openrouter"],
-        extra_headers={"HTTP-Referer": "https://akira.ai", "X-Title": "Akira AI"},
+        extra_headers={"HTTP-Referer": "https://tanoaudit.ai", "X-Title": "TanoAudit"},
         response_json=response_json,
     )
 
@@ -265,7 +265,7 @@ async def stream_openrouter(key: str, prompt: str, model: str | None = None,
     async for d in _stream_openai_style(
         "openrouter", "https://openrouter.ai/api/v1", key, prompt,
         model or DEFAULT_MODELS["openrouter"],
-        extra_headers={"HTTP-Referer": "https://akira.ai", "X-Title": "Akira AI"},
+        extra_headers={"HTTP-Referer": "https://tanoaudit.ai", "X-Title": "TanoAudit"},
         messages=messages,
     ):
         yield d

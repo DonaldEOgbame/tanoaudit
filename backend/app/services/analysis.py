@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, ValidationError
 from app.services.segmentation import SegmentData
 from app.services.taxonomy import OPTIMIZATION_CATEGORIES, slice_taxonomy
 
-logger = logging.getLogger("akira.analysis")
+logger = logging.getLogger("tanoaudit.analysis")
 
 # A provider call: (prompt, model_hint) -> raw text. Module 4 supplies the real one.
 CompleteFn = Callable[[str, str | None], Awaitable[str]]

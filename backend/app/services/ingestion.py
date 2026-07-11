@@ -240,7 +240,7 @@ def walk_source(root: str, ignore_globs: list[str] | None = None) -> list[Source
 
 
 def make_scan_workdir() -> str:
-    return tempfile.mkdtemp(prefix="akira_scan_")
+    return tempfile.mkdtemp(prefix="tanoaudit_scan_")
 
 
 def scan_upload_dir(scan_id: str) -> str:

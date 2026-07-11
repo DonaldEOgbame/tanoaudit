@@ -1,7 +1,7 @@
-"""Akira model catalog: the single mapping from user-facing tiers to the
+"""TanoAudit model catalog: the single mapping from user-facing tiers to the
 hidden provider + concrete model id.
 
-Users select an Akira-branded tier (e.g. "akira_deep"); the vendor (Gemini /
+Users select an TanoAudit-branded tier (e.g. "tanoaudit_deep"); the vendor (Gemini /
 OpenRouter) and the concrete model id never leave the server. The API exposes
 only `{id, label, description}` per tier. Scans/chat store the tier id in
 `Scan.models` / `model_hint`; the router resolves it to (provider, model) here.
@@ -18,7 +18,7 @@ from app.core.config import settings
 
 @dataclass(frozen=True)
 class ModelTier:
-    id: str            # stable tier id stored on scans (e.g. "akira_fast")
+    id: str            # stable tier id stored on scans (e.g. "tanoaudit_fast")
     label: str         # user-facing name (vendor never mentioned)
     description: str   # short blurb for the selector
     provider: str      # hidden: "gemini" | "openrouter"
@@ -28,23 +28,23 @@ class ModelTier:
 def _catalog() -> dict[str, ModelTier]:
     """Build the tier catalog from current settings (so env overrides apply)."""
     return {
-        "akira_fast": ModelTier(
-            id="akira_fast",
-            label="Akira Fast",
+        "tanoaudit_fast": ModelTier(
+            id="tanoaudit_fast",
+            label="Fast",
             description="Lightest coverage — a quick first pass.",
             provider="openrouter",
             model=settings.tier_fast_model,
         ),
-        "akira_balanced": ModelTier(
-            id="akira_balanced",
-            label="Akira Balanced",
+        "tanoaudit_balanced": ModelTier(
+            id="tanoaudit_balanced",
+            label="Balanced",
             description="Broader coverage for everyday scans. Recommended.",
             provider="openrouter",
             model=settings.tier_balanced_model,
         ),
-        "akira_deep": ModelTier(
-            id="akira_deep",
-            label="Akira Deep",
+        "tanoaudit_deep": ModelTier(
+            id="tanoaudit_deep",
+            label="Deep",
             description="Widest coverage for large repos. Takes longest.",
             provider="openrouter",
             model=settings.tier_deep_model,
@@ -52,7 +52,7 @@ def _catalog() -> dict[str, ModelTier]:
     }
 
 
-DEFAULT_TIER = "akira_balanced"
+DEFAULT_TIER = "tanoaudit_balanced"
 
 
 def all_tiers() -> list[ModelTier]:

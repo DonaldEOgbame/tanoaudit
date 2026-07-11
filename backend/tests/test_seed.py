@@ -45,9 +45,9 @@ async def test_seed_produces_complete_demo(client):
     assert demo["completeness_score"] == 52
 
     # No per-user API keys: the server holds provider keys. The demo user has a
-    # default Akira tier preference instead.
+    # default TanoAudit tier preference instead.
     r = await client.get(f"{PREFIX}/settings/models", headers=headers)
-    assert r.json()["data"]["default_tier"] == "akira_balanced"
+    assert r.json()["data"]["default_tier"] == "tanoaudit_balanced"
 
     # Optimization plan + watched repo.
     r = await client.get(f"{PREFIX}/watchlist", headers=headers)

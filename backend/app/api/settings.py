@@ -1,7 +1,7 @@
 """Module 2 router: model preferences + privacy.
 
 Users no longer provide API keys — the server holds one key per provider and
-users pick Akira-branded model tiers (see services/model_catalog.py). Model and
+users pick TanoAudit-branded model tiers (see services/model_catalog.py). Model and
 privacy preferences live in the user's JSON blobs (`settings`, `privacy`) so they
 travel with the profile.
 """
@@ -25,7 +25,7 @@ _MODEL_KEY = "model_settings"  # nested under user.settings
 # ---- Model preferences ------------------------------------------------------
 @router.get("/models")
 async def get_model_settings(user: User = Depends(get_current_user)):
-    """The user's default Akira tier preference (no provider keys involved)."""
+    """The user's default TanoAudit tier preference (no provider keys involved)."""
     stored = (user.settings or {}).get(_MODEL_KEY, {})
     return envelope(ModelSettings(**stored).model_dump())
 

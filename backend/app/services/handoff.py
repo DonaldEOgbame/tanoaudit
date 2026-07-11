@@ -261,7 +261,7 @@ def render_handoff_markdown(
 
     chain_note = f", {len(attack_paths)} attack chains" if attack_paths else ""
     head = [
-        "# Akira AI Security Audit Handoff",
+        "# TanoAudit Security Audit Handoff",
         f"## Repository: {scan.repo or scan.id}",
         f"## Branch: {scan.branch or '—'} @ {scan.commit or '—'}",
         f"## Scan date: {date_str}",

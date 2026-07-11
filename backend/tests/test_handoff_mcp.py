@@ -60,7 +60,7 @@ async def test_generate_and_consume(seeded):
     r = await client.get(f"{PREFIX}/audits/{audit_id}/handoff?token={token}")
     assert r.status_code == 200
     md = r.text
-    assert "# Akira AI Security Audit Handoff" in md
+    assert "# TanoAudit Security Audit Handoff" in md
     assert "VLN-0001 | CRITICAL | Injection" in md
     assert "CWE-89" in md
     assert "Fix immediately" in md
@@ -85,7 +85,7 @@ async def test_direct_consume(seeded):
     r = await client.get(f"/handoff/{audit_id}?token={token}")
     assert r.status_code == 200
     md = r.text
-    assert "# Akira AI Security Audit Handoff" in md
+    assert "# TanoAudit Security Audit Handoff" in md
 
 
 async def test_scope_filtering(seeded):
@@ -166,7 +166,7 @@ async def test_handoff_generated_event_logged(seeded):
 
 # ---- URL parsing ------------------------------------------------------------
 def test_parse_handoff_url():
-    aid, tok = _parse_handoff_url("https://akira.ai/handoff/scan-123?token=abc.def")
+    aid, tok = _parse_handoff_url("https://tanoaudit.ai/handoff/scan-123?token=abc.def")
     assert aid == "scan-123" and tok == "abc.def"
     aid, tok = _parse_handoff_url("not a url")
     assert aid is None or tok is None
@@ -179,7 +179,7 @@ async def test_mcp_initialize(client):
     })
     assert r.status_code == 200
     data = r.json()
-    assert data["result"]["serverInfo"]["name"] == "akira-ai"
+    assert data["result"]["serverInfo"]["name"] == "tanoaudit-ai"
     assert "tools" in data["result"]["capabilities"]
     # No version requested -> server offers its newest supported version.
     assert data["result"]["protocolVersion"] == "2025-06-18"
@@ -221,7 +221,7 @@ async def test_mcp_fetch_audit_handoff_tool(seeded):
     })
     result = r.json()["result"]
     assert result["isError"] is False
-    assert "Akira AI Security Audit Handoff" in result["content"][0]["text"]
+    assert "TanoAudit Security Audit Handoff" in result["content"][0]["text"]
 
 
 async def test_mcp_mark_finding_fixed_requires_handoff(seeded):

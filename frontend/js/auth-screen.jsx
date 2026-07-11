@@ -1,11 +1,11 @@
-// Akira AI — Auth screen (login + register), wired to the real backend.
-// Exposes window.AuthScreen. Calls AkiraAPI.auth; on success invokes onAuthed().
+// TanoAudit — Auth screen (login + register), wired to the real backend.
+// Exposes window.AuthScreen. Calls TanoAuditAPI.auth; on success invokes onAuthed().
 (function () {
   const React = window.React;
   const { useState, useRef, useEffect } = React;
   const h = React.createElement;
   const Icons = window.Icons || {};
-  const API = window.AkiraAPI;
+  const API = window.TanoAuditAPI;
 
   function Field({ label, type, value, onChange, autoFocus, placeholder, autoComplete, onEnter }) {
     const [reveal, setReveal] = useState(false);
@@ -172,24 +172,12 @@
           fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
         },
       }, "← Home"),
-      h("div", {
-        className: "akl-auth-container vs-page-enter"
-      },
-        // Left Side Panel: Samurai image & quote
-        h("div", { className: "akl-auth-left" },
-          h("div", { className: "akl-auth-left-content" },
-            h("div", { className: "akl-auth-quote-jp" }, "心眼を開き、目に見えぬところを悟ること"),
-            h("div", { className: "akl-auth-quote-en" },
-              "\"Open the shingan (mind's eye) and perceive that which cannot be seen by the eyes.\"",
-              h("br"),
-              "— Miyamoto Musashi, The Book of Five Rings"
-            )
-          )
-        ),
-        // Right Side Panel: Form contents
-        h("div", { className: "akl-auth-right" },
+      h("div", { className: "ta-auth-shell vs-page-enter" },
+        h("div", { className: "ta-auth-card" },
+          h("div", { className: "ta-auth-brand" },
+            h("div", { style: { fontSize: 26, fontWeight: 700, letterSpacing: "-0.04em", color: "var(--text-1)" } }, "TanoAudit")
+          ),
           h("div", { style: { display: "flex", flexDirection: "column", gap: 6, alignItems: "center", textAlign: "center" } },
-            h("img", { src: "logo.svg", alt: "Akira AI", style: { height: 54, marginBottom: 12 } }),
             h("h1", { style: { fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em" } },
               isLogin ? "Welcome back" : "Create your account"),
             h("p", { style: { fontSize: 13, color: "var(--text-2)" } },
@@ -255,7 +243,7 @@
           }, busy ? "Please wait…" : needTotp ? "Verify" : isLogin ? "Sign in" : "Create account"),
 
           !needTotp && h("div", { style: { fontSize: 12.5, color: "var(--text-2)", textAlign: "center" } },
-            isLogin ? "New to Akira AI? " : "Already have an account? ",
+            isLogin ? "New to TanoAudit? " : "Already have an account? ",
             h("button", {
               onClick: () => reset(isLogin ? "register" : "login"),
               style: { background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 12.5, fontWeight: 600, padding: 0 },

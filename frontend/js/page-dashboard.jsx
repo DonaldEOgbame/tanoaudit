@@ -1,10 +1,10 @@
-// Akira AI — Dashboard (returning + first-run onboarding), wired to real data.
+// TanoAudit — Dashboard (returning + first-run onboarding), wired to real data.
 (function () {
   const React = window.React;
   const { useState, useEffect, useCallback } = React;
   const h = React.createElement;
   const Icons = window.Icons;
-  const API = window.AkiraAPI;
+  const API = window.TanoAuditAPI;
   const { CountUp, SevDot, ProgressBar, scoreColor } = window;
 
   function errMsg(e) { return (e && e.message) || "Something went wrong"; }
@@ -326,8 +326,8 @@
 
     const done = { 1: ghConnected || clicked[1], 2: clicked[2] };
     const steps = [
-      { n: 1, title: "Connect GitHub", desc: "Authorize Akira AI to read the repositories you want to scan.", cta: "Connect", icon: "github" },
-      { n: 2, title: "Run your first scan", desc: "Point Akira AI at a repo and watch both engines go to work.", cta: "New scan", icon: "shield" },
+      { n: 1, title: "Connect GitHub", desc: "Authorize TanoAudit to read the repositories you want to scan.", cta: "Connect", icon: "github" },
+      { n: 2, title: "Run your first scan", desc: "Point TanoAudit at a repo and watch both engines go to work.", cta: "New scan", icon: "shield" },
     ];
     const completedCount = Object.values(done).filter(Boolean).length;
 
@@ -336,7 +336,7 @@
       h("div", { style: { textAlign: "center", padding: "30px 0 28px" } },
         h(FloatingShield, null),
         h("h1", { style: { fontSize: 30, fontWeight: 750, letterSpacing: "-0.025em", marginTop: 18 } },
-          firstName && firstName !== "there" ? ("Welcome, " + firstName) : "Welcome to Akira AI"),
+          firstName && firstName !== "there" ? ("Welcome, " + firstName) : "Welcome to TanoAudit"),
         h("p", { style: { color: "var(--text-2)", fontSize: 15, maxWidth: 520, margin: "8px auto 0", textWrap: "pretty" } },
           "One scan, two engines — find ", h("strong", { style: { color: "var(--text-1)" } }, "300+ vulnerability classes"),
           " and optimize performance, quality and scale at the same time."),
@@ -397,6 +397,6 @@
 
   function FloatingShield() {
     return h("div", { style: { display: "flex", justifyContent: "center", marginBottom: 4 } },
-      h("img", { src: "logo.svg", alt: "Akira AI", style: { height: 52, width: "auto", objectFit: "contain", animation: "frFloat 3.5s ease-in-out infinite", filter: "drop-shadow(0 8px 24px var(--accent-soft))" } }));
+      h("img", { src: "logo.svg?v=3", alt: "TanoAudit", style: { height: 52, width: "auto", objectFit: "contain", animation: "frFloat 3.5s ease-in-out infinite", filter: "drop-shadow(0 8px 24px var(--accent-soft))" } }));
   }
 })();

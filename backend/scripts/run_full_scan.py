@@ -166,7 +166,7 @@ async def _amain(args) -> int:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Run a full Akira scan from the CLI.")
+    p = argparse.ArgumentParser(description="Run a full TanoAudit scan from the CLI.")
     src = p.add_mutually_exclusive_group(required=True)
     src.add_argument("--dir", help="Scan a local directory (no clone needed)")
     src.add_argument("--url", help="Scan a public git URL")

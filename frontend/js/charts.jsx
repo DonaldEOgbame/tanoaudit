@@ -1,4 +1,4 @@
-// Akira AI — chart kit: SegmentArc, TrendArea, RoundedBars, RingStat, HeatGrid
+// TanoAudit — chart kit: SegmentArc, TrendArea, RoundedBars, RingStat, HeatGrid
 (function () {
   const React = window.React;
   const { useState, useEffect, useRef } = React;

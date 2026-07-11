@@ -1,4 +1,4 @@
-// Akira AI — Scoped Report Chat (full-height, no outer card, exec summary as first message)
+// TanoAudit — Scoped Report Chat (full-height, no outer card, exec summary as first message)
 (function () {
   const React = window.React;
   const { useState, useRef, useEffect } = React;
@@ -416,10 +416,10 @@ Is there a specific finding, file, or category you'd like me to explain?`;
   }
 
   function ReportChat({ setTab, meta, findings, attackPaths }) {
-    const API = window.AkiraAPI;
+    const API = window.TanoAuditAPI;
     const META = meta || window.VS_REPO_META;
     const scanId = META && META.id && meta ? META.id : null; // only treat as real when meta came from a scan
-    const storageKey = scanId ? "akira:chat:" + scanId : "akira:chat:demo";
+    const storageKey = scanId ? "tanoaudit:chat:" + scanId : "tanoaudit:chat:demo";
 
     const getBaseInitial = React.useCallback(() => {
       // Real scan with a backend-generated summary — use it verbatim.
@@ -475,7 +475,7 @@ Is there a specific finding, file, or category you'd like me to explain?`;
     }, [messages, storageKey]);
     const [input, setInput] = useState("");
     const [streaming, setStreaming] = useState(false);
-    // Akira model tiers for the chat engine selector.
+    // TanoAudit model tiers for the chat engine selector.
     const [tiers, setTiers] = useState([]);
     const [tier, setTier] = useState(null);
     useEffect(() => {
@@ -724,7 +724,7 @@ Is there a specific finding, file, or category you'd like me to explain?`;
                 : h(Icons.arrowUp, { size: 17 })))),
 
         // Helper line, like Claude's disclaimer
-        h("div", { style: { textAlign: "center", fontSize: 11.5, color: "var(--text-3)", marginTop: 9 } }, "Akira can only discuss this scan’s findings."))));
+        h("div", { style: { textAlign: "center", fontSize: 11.5, color: "var(--text-3)", marginTop: 9 } }, "TanoAudit can only discuss this scan’s findings."))));
   }
   window.ReportChat = ReportChat;
   window.renderMarkdown = renderMarkdown;

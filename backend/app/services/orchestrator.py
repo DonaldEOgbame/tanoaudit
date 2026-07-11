@@ -40,7 +40,7 @@ from app.services.router_model import ModelRouter
 from app.services.segmentation import SegmentData, segment_files
 from app.services.verification import verify_criticals
 
-logger = logging.getLogger("akira.analysis")
+logger = logging.getLogger("tanoaudit.analysis")
 
 
 class _Cancelled(Exception):
@@ -297,7 +297,7 @@ async def run_scan(
             return
 
     # Build the multi-model router from the SERVER's provider keys + the scan's
-    # selected Akira tiers, unless a provider callable was injected (tests). With
+    # selected TanoAudit tiers, unless a provider callable was injected (tests). With
     # no server key configured (deploy misconfig), fall back to the empty-result
     # placeholder so the scan still completes rather than erroring.
     router: ModelRouter | None = None
@@ -639,7 +639,7 @@ async def _emit_github_outcomes(scan_id: str) -> None:
         try:
             await gh.post_commit_status(
                 token, repo, sha, state,
-                status_check.get("check_name") or "Akira AI security check", desc,
+                status_check.get("check_name") or "TanoAudit security check", desc,
             )
         except Exception:  # noqa: BLE001 — best-effort
             logger.exception("commit status post failed for scan %s", scan_id)

@@ -5,9 +5,9 @@
   const h = React.createElement;
   const Icons = window.Icons;
   const { Switch, Tag, Avatar, ProgressBar, Dropdown } = window;
-  const API = window.AkiraAPI;
+  const API = window.TanoAuditAPI;
 
-  // Surface an AkiraAPI failure as a toast. Returns the message.
+  // Surface an TanoAuditAPI failure as a toast. Returns the message.
   function errMsg(e) {
     if (e && e.message) return e.message;
     if (e && e.code) return e.code;
@@ -130,7 +130,7 @@
   // settings with no backend endpoint; persisting locally keeps the user's
   // choice across reloads instead of silently discarding it.
   function usePref(key, fallback) {
-    const k = "akira.pref." + key;
+    const k = "tanoaudit.pref." + key;
     const [val, setVal] = useState(() => {
       try { return localStorage.getItem(k) || fallback; } catch (e) { return fallback; }
     });
@@ -442,7 +442,7 @@
 
     const explainers = [
       ["What we store", "Scan metadata, findings, and snippets of flagged code (max 40 lines per finding). We never store your full repository."],
-      ["Where code goes", "Code segments are sent to Akira's AI models for analysis, then discarded. They are never used to train models."],
+      ["Where code goes", "Code segments are sent to TanoAudit's AI models for analysis, then discarded. They are never used to train models."],
       ["Retention", "Scan history is kept until you delete it. Deleted scans are purged from backups within 30 days."]];
 
     return h("div", null, h(H2, null, "Privacy & Data"),
@@ -454,7 +454,7 @@
       loaded.error
         ? h("div", { style: { marginTop: 14 } }, h(ErrorBlock, { msg: loaded.error, onRetry: reload }))
         : h("div", { style: { marginTop: 14, opacity: loaded.loading ? 0.6 : 1 } },
-            h(SRow, { label: "Help improve Akira AI", desc: "Share anonymized finding feedback" }, h(Switch, { on: improve, onChange: onImprove })),
+            h(SRow, { label: "Help improve TanoAudit", desc: "Share anonymized finding feedback" }, h(Switch, { on: improve, onChange: onImprove })),
             h(SRow, { label: "Store scan history", desc: "Required for trends and scan diffs" }, h(Switch, { on: history, onChange: onHistory }))),
       h("div", { style: { display: "flex", gap: 8, marginTop: 16 } },
         // TODO(no-endpoint): no data-export / delete-history endpoints exist yet.
@@ -836,9 +836,9 @@
   }
 
   function HelpSec() {
-    const DOCS = "https://github.com/donaldemmaogbame/AkiraAI";
-    const SUPPORT = "mailto:support@akira.ai?subject=Akira%20AI%20Support";
-    const BUG = "mailto:support@akira.ai?subject=Akira%20AI%20Bug%20Report";
+    const DOCS = "https://github.com/donaldemmaogbame/TanoAuditAI";
+    const SUPPORT = "mailto:support@tanoaudit.ai?subject=TanoAudit%20AI%20Support";
+    const BUG = "mailto:support@tanoaudit.ai?subject=TanoAudit%20AI%20Bug%20Report";
     // Each item: [label, icon, action]. Doc-style links open the repo/docs in a
     // new tab; support/bug open a pre-filled mail draft.
     const items = [
@@ -855,6 +855,6 @@
           h("button", { key: label, className: "card card-hover", onClick: action, style: { padding: "14px 16px", display: "flex", alignItems: "center", gap: 10, textAlign: "left", cursor: "pointer" } },
             h(Icons[icon], { size: 16, style: { color: "var(--accent)" } }),
             h("span", { style: { fontSize: 13, fontWeight: 550 } }, label)))),
-      h("div", { style: { marginTop: 20, fontSize: 12, color: "var(--text-3)" } }, "Akira AI v2.4.1 · © 2026 Akira AI Inc."));
+      h("div", { style: { marginTop: 20, fontSize: 12, color: "var(--text-3)" } }, "TanoAudit v2.4.1 · © 2026 TanoAudit Inc."));
   }
 })();

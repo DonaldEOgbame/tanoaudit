@@ -133,7 +133,7 @@ async def _maybe_post_status(db, token, scan, sec_findings, conn) -> None:
     try:
         await gh.post_commit_status(
             token, scan.repo, scan.commit, state,
-            sc.get("check_name", "Akira AI security check"), desc,
+            sc.get("check_name", "TanoAudit security check"), desc,
         )
         _record(db, scan, "status", 200, f"Commit status posted: {state} — {desc}")
     except httpx.HTTPError as exc:

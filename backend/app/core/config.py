@@ -8,8 +8,8 @@ from typing import Annotated, ClassVar
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-# Tests set AKIRA_TESTING=1 so the real .env doesn't leak into the test config.
-_ENV_FILE = None if os.environ.get("AKIRA_TESTING") else ".env"
+# Tests set TANOAUDIT_TESTING=1 so the real .env doesn't leak into the test config.
+_ENV_FILE = None if os.environ.get("TANOAUDIT_TESTING") else ".env"
 
 
 class Settings(BaseSettings):
@@ -19,11 +19,11 @@ class Settings(BaseSettings):
 
     # App
     app_env: str = "development"
-    # True under pytest (conftest sets AKIRA_TESTING=1). Used to skip the
+    # True under pytest (conftest sets TANOAUDIT_TESTING=1). Used to skip the
     # in-process maintenance loop, which tests drive directly instead.
-    testing: bool = bool(os.environ.get("AKIRA_TESTING"))
+    testing: bool = bool(os.environ.get("TANOAUDIT_TESTING"))
     rate_limit_enabled: bool = True
-    app_name: str = "Akira AI"
+    app_name: str = "TanoAudit"
     api_v1_prefix: str = "/api/v1"
     # NoDecode: let our comma-split validator handle the env string (otherwise
     # pydantic-settings tries to JSON-parse list fields and rejects "a,b,c").
@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     ]
 
     # Database
-    database_url: str = "sqlite+aiosqlite:///./akira.db"
+    database_url: str = "sqlite+aiosqlite:///./tanoaudit.db"
 
     # Security
     jwt_secret: str = "change-me-in-production"
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     fernet_key: str = "change-me-generate-a-real-fernet-key"
 
     # TOTP
-    totp_issuer: str = "Akira AI"
+    totp_issuer: str = "TanoAudit"
 
     # Optional bearer API key for the MCP server (/mcp). When set, every /mcp
     # request must send `Authorization: Bearer <key>`. Unset = open transport
@@ -57,13 +57,13 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_user: str | None = None
     smtp_password: str | None = None
-    smtp_from: str = "Akira AI <no-reply@akira.ai>"
+    smtp_from: str = "TanoAudit <no-reply@tanoaudit.ai>"
     # MailerSend HTTP email provider (preferred over SMTP when set).
     mailersend_api_key: str | None = None
 
     # Storage
     export_dir: str = "./exports"
-    public_base_url: str = "https://akira.ai"
+    public_base_url: str = "https://tanoaudit.ai"
 
     # Where the SPA is served. Used to redirect the browser back into the app
     # after server-side OAuth callbacks (e.g. GitHub connect).
@@ -92,11 +92,11 @@ class Settings(BaseSettings):
     # Server-held provider keys. The app uses these for every user's scans/chat;
     # there is no bring-your-own-key. Unset -> that provider is unavailable and
     # scans fall back to the empty-result placeholder (a deploy misconfig, not a
-    # user state). The vendor names are internal only — users pick Akira tiers.
+    # user state). The vendor names are internal only — users pick TanoAudit tiers.
     gemini_api_key: str | None = None
     openrouter_api_key: str | None = None
 
-    # Concrete model id backing each user-facing Akira tier (see
+    # Concrete model id backing each user-facing TanoAudit tier (see
     # services/model_catalog.py). Env-overridable so a tier's backend can change
     # without touching stored tier ids or the UI. The vendor for each tier is
     # all on the openrouter provider; Gemini is kept only as an auto fallback).

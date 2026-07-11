@@ -1,10 +1,10 @@
-// Akira AI — Learning Hub, Integrations
+// TanoAudit — Learning Hub, Integrations
 (function () {
   const React = window.React;
   const { useState, useEffect } = React;
   const h = React.createElement;
   const Icons = window.Icons;
-  const API = window.AkiraAPI;
+  const API = window.TanoAuditAPI;
   const { SevBadge, Avatar, Switch, Tag, Modal, PageHead, Dropdown } = window;
 
   // ============ LEARNING HUB ============
@@ -468,7 +468,7 @@
           h("div", null, h("label", { className: "flabel" }, "Ignore paths"),
             h("input", { className: "field mono", defaultValue: (triggers.ignore_paths || []).join(", "), style: { fontSize: 12 },
               onBlur: (e) => patchSettings(API.github.setTriggers, { ignore_paths: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) }, "triggers", "Ignore paths saved") })))),
-      h(Section, { title: "Webhook", desc: "Akira AI receives repository events at this endpoint." },
+      h(Section, { title: "Webhook", desc: "TanoAudit receives repository events at this endpoint." },
         h("label", { className: "flabel" }, "Payload URL"),
         h("div", { style: { display: "flex", gap: 6, marginBottom: 12 } },
           h("input", { className: "field mono", readOnly: true, value: status.webhook_url || "", style: { fontSize: 12 } }),
@@ -515,7 +515,7 @@
             onBlur: (e) => patchSettings(API.github.setStatusCheck, { check_name: e.target.value.trim() }, "status_check", "Check name saved") }))));
 
     return h("div", { className: "vs-page-pad vs-page-enter", style: { maxWidth: 760 }, "data-screen-label": "Integrations" },
-      h(PageHead, { title: "Integrations", desc: "Connect Akira AI to your development workflow." }),
+      h(PageHead, { title: "Integrations", desc: "Connect TanoAudit to your development workflow." }),
       connectionCard,
       expandedSettings,
       h("h3", { style: { fontSize: 15, fontWeight: 650, marginTop: 28, marginBottom: 12 } }, "Other Integrations"),

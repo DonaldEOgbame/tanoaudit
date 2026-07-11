@@ -1,11 +1,11 @@
-// Akira AI — FindingCard (two-panel diff, AI fix, actions)
+// TanoAudit — FindingCard (two-panel diff, AI fix, actions)
 (function () {
   const React = window.React;
   const { useState } = React;
   const h = React.createElement;
   const Icons = window.Icons;
   const { SevBadge, Tag, CodeBlock } = window;
-  const API = window.AkiraAPI;
+  const API = window.TanoAuditAPI;
 
   // Line-range label from the normalized finding shape (start + count).
   function lineRange(f) {

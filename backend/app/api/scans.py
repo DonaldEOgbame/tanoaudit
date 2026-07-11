@@ -123,7 +123,7 @@ async def upload_scan(
 
 @router.get("/models")
 async def list_model_tiers(user: User = Depends(get_current_user)):
-    """The Akira model tiers a user can pick for a scan/chat. Exposes only
+    """The TanoAudit model tiers a user can pick for a scan/chat. Exposes only
     id/label/description — never the underlying provider or concrete model."""
     return envelope({"tiers": model_catalog.public_tiers(),
                      "default": model_catalog.DEFAULT_TIER})

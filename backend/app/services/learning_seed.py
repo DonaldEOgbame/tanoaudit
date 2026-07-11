@@ -210,7 +210,7 @@ def _faq(name: str, category: str, cwe: str | None, owasp: str | None, severity:
                 f"Look for the tell-tale patterns of {name}: places where {ctx} is handled "
                 f"without an explicit, centralised safeguard. Grep for the risky APIs, review the "
                 f"code paths that handle untrusted input or privileged actions, and confirm a "
-                f"control actually runs on every path — not just the happy path. Akira AI flags "
+                f"control actually runs on every path — not just the happy path. TanoAudit flags "
                 f"the specific lines, but a manual read of the surrounding function confirms it."
             ),
         },
@@ -326,7 +326,7 @@ def _chain_faq(name: str) -> list[dict]:
                 "depth means even if one link returns, the chain stays broken."
             ),
             "advanced": (
-                "Akira flags the constituent findings individually and links them into this path so you "
+                "TanoAudit flags the constituent findings individually and links them into this path so you "
                 "can see the whole chain, not just isolated dots."
             ),
         },

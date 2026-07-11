@@ -5,11 +5,11 @@ import os
 import tempfile
 
 # Don't load the real .env into the test config (it may have real keys set).
-os.environ["AKIRA_TESTING"] = "1"
+os.environ["TANOAUDIT_TESTING"] = "1"
 
 # A temp *file* DB (not :memory:) so the orchestrator's separate sessions —
 # which run in background tasks on their own connections — share state.
-_db_path = os.path.join(tempfile.gettempdir(), "akira_test.db")
+_db_path = os.path.join(tempfile.gettempdir(), "tanoaudit_test.db")
 os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{_db_path}")
 os.environ.setdefault("FERNET_KEY", "X43ZaXmyDjfp88SFRC8ISRZMvv8a9XCWobN_PO6tdO4=")
 os.environ.setdefault("JWT_SECRET", "test-secret")
@@ -41,7 +41,7 @@ async def client():
 @pytest_asyncio.fixture
 async def auth(client):
     """Register + login a user; return (client, headers, tokens)."""
-    email = "demo@akira.ai"
+    email = "demo@tanoaudit.ai"
     password = "supersecret123"
     await client.post(f"{PREFIX}/auth/register", json={"email": email, "password": password})
     r = await client.post(f"{PREFIX}/auth/login", json={"email": email, "password": password})

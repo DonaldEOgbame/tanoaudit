@@ -6,7 +6,7 @@
   const Icons = window.Icons;
   const { CountUp, ScoreGauge, SevBadge, SevDot, Tag, CodeBlock, Tabs, Avatar, scoreColor, Switch } = window;
 
-  const API = window.AkiraAPI;
+  const API = window.TanoAuditAPI;
   const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3, info: 4, opt: 5 };
 
   function getDiffHighlights(codeA, codeB) {
@@ -339,7 +339,7 @@
 
     // Create-or-reuse a share link on open (for real scans).
     useEffect(() => {
-      if (!scanId) { setLink("https://akira.ai/r/8fk2-demo"); setLoading(false); return; }
+      if (!scanId) { setLink("https://tanoaudit.ai/r/8fk2-demo"); setLoading(false); return; }
       let alive = true;
       const toLink = (s) => {
         if (!s) return "";
@@ -378,15 +378,15 @@
     const [generating, setGenerating] = useState(false);
     const [url, setUrl] = useState("");
     // Backend origin (strip the /api/v1 suffix from the client base).
-    const base = (window.AkiraAPI && window.AkiraAPI.BASE.replace(/\/api\/v1$/, "")) || "http://localhost:8000";
+    const base = (window.TanoAuditAPI && window.TanoAuditAPI.BASE.replace(/\/api\/v1$/, "")) || "http://localhost:8000";
     const auditId = (meta && meta.id) || scanId || "scan-1";
-    const mcpAdd = "claude mcp add --transport http akira " + base + "/mcp";
+    const mcpAdd = "claude mcp add --transport http tanoaudit " + base + "/mcp";
 
     async function generate() {
       if (!scanId) { setUrl(base + "/handoff/" + auditId + "?token=demo"); setPhase("generated"); return; }
       setGenerating(true);
       try {
-        const res = await window.AkiraAPI.handoff.generate(auditId, { scope });
+        const res = await window.TanoAuditAPI.handoff.generate(auditId, { scope });
         const link = res.url || (base + "/api/v1/handoff/" + auditId + "?token=" + (res.token || res.id));
         setUrl(link); setPhase("generated");
         toast({ kind: "success", msg: "Handoff link generated" });
@@ -451,14 +451,14 @@
           h("div", { style: { marginBottom: 18 } }, codeRow("url", url)),
 
           h("div", { style: { fontSize: 13, fontWeight: 650, margin: "4px 0 12px" } }, "Set up in Claude Code"),
-          step("1", "Add the Akira MCP server (one time)",
+          step("1", "Add the TanoAudit MCP server (one time)",
             h("div", null,
-              h("p", { style: { fontSize: 12, color: "var(--text-2)", marginBottom: 6 } }, "In your terminal, register Akira as an MCP server:"),
+              h("p", { style: { fontSize: 12, color: "var(--text-2)", marginBottom: 6 } }, "In your terminal, register TanoAudit as an MCP server:"),
               codeRow("mcp", mcpAdd))),
           step("2", "Point Claude Code at the audit",
             h("div", null,
               h("p", { style: { fontSize: 12, color: "var(--text-2)", marginBottom: 6 } }, "In a Claude Code session, paste:"),
-              codeRow("prompt", "Fetch the Akira audit from " + url + " and fix the findings."))),
+              codeRow("prompt", "Fetch the TanoAudit audit from " + url + " and fix the findings."))),
           step("3", "Claude fixes & reports back",
             h("p", { style: { fontSize: 12, color: "var(--text-2)" } }, "Claude calls ", h("code", { className: "mono", style: { fontSize: 11 } }, "fetch_audit_handoff"), " to read the findings, applies fixes, then calls ", h("code", { className: "mono", style: { fontSize: 11 } }, "mark_finding_fixed"), " — each one flips to ", h("span", { style: { color: "var(--sev-clean)", fontWeight: 600 } }, "Fixed via Claude Code"), " here in real time.")),
           h("p", { style: { fontSize: 11.5, color: "var(--text-3)", marginTop: 4 } }, "Manage or revoke this link anytime from Settings → Handoff links.")),

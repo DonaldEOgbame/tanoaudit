@@ -1,4 +1,4 @@
-# Akira AI — Frontend ↔ Backend Wiring Plan
+# TanoAudit — Frontend ↔ Backend Wiring Plan
 
 The backend (FastAPI, `backend/`) is **feature-complete**: ~20 routers, JWT auth,
 scans + live WebSocket, reports, findings, chat, GitHub, etc. The frontend
@@ -14,13 +14,13 @@ split the work across multiple AI agents **without collisions**.
 
 ## How the pieces fit
 
-- **API client:** `frontend/js/api.js` → `window.AkiraAPI`. Handles the `{data, error}`
+- **API client:** `frontend/js/api.js` → `window.TanoAuditAPI`. Handles the `{data, error}`
   envelope, JWT storage + auto-refresh on 401, and a WebSocket helper. Base URL comes
-  from `?api=` → `<meta name="akira-api">` → `http://localhost:8000/api/v1`.
+  from `?api=` → `<meta name="tanoaudit-api">` → `http://localhost:8000/api/v1`.
 - **Envelope:** every REST response is `{"data": <payload>, "error": null}` on success
-  or `{"data": null, "error": {"code","message"}}` on failure. `AkiraAPI` already
+  or `{"data": null, "error": {"code","message"}}` on failure. `TanoAuditAPI` already
   unwraps `.data` for you and throws `ApiError(code, message, status)` on failure.
-- **Auth:** `AkiraAPI.auth.login/register/logout/me`. Tokens live in `localStorage`.
+- **Auth:** `TanoAuditAPI.auth.login/register/logout/me`. Tokens live in `localStorage`.
   The app is gated by `Gate` in `app.jsx`.
 - **Demo globals to kill:** `window.VS_FINDINGS`, `VS_REPO_META`, `VS_SCANS`,
   `VS_ACTIVITY`, `VS_DEPS`, `VS_AIGEN`, `VS_HISTORY`, `VS_REPO_FILES`, `VS_PLANS`,
@@ -91,7 +91,7 @@ Add every API namespace the later slices need, in one pass, so nobody else has t
   `setMethod`, `backupCodes`, `sessions()`, `deleteSession(id)`, `loginHistory()`
 - [ ] `funFacts` — `get()` (optional; can keep `VS_FACTS`)
 
-**Acceptance:** `api.js` exposes all namespaces; `window.AkiraAPI` lists them; no page
+**Acceptance:** `api.js` exposes all namespaces; `window.TanoAuditAPI` lists them; no page
 files changed. Smoke-test a couple of GETs in the browser console.
 
 ---
@@ -113,7 +113,7 @@ files changed. Smoke-test a couple of GETs in the browser console.
   AI-Gen, Heatmap, History derive from real findings / `GET /scans/{id}/diff/{other}`.
 - [ ] Export buttons → `POST /scans/{id}/exports` + poll `GET .../exports` + download via
   `reports.downloadExportUrl`. Replace the hardcoded `VS_API_BASE` at
-  `page-report.jsx:114` with `AkiraAPI.BASE`.
+  `page-report.jsx:114` with `TanoAuditAPI.BASE`.
 - [ ] Share link → `POST /scans/{id}/share`.
 
 **Acceptance:** Open a finished scan → real scores, real findings, working fix
@@ -218,8 +218,8 @@ Yes, parallel agents are fine. To avoid stepping on each other:
 1. **Land Slice 0 first, solo.** Everything else imports from `api.js`.
 2. **One agent per slice, one git branch (or worktree) per agent.** With Claude Code:
    spawn each in its own worktree so edits are physically isolated until merge:
-   - `git worktree add ../akira-slice1 -b wire/report`
-   - `git worktree add ../akira-slice2 -b wire/dashboard`
+   - `git worktree add ../tanoaudit-slice1 -b wire/report`
+   - `git worktree add ../tanoaudit-slice2 -b wire/dashboard`
 3. **Respect the "Owns" / "Also edits" columns.** A slice may only edit files it owns.
    The shared trio (`api.js`, `app.jsx`, `index.html`) is the collision risk — keep
    those edits tiny and listed.

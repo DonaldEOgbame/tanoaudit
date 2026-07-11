@@ -18,7 +18,7 @@ import time
 
 from app.core.config import settings
 
-logger = logging.getLogger("akira.file_cache")
+logger = logging.getLogger("tanoaudit.file_cache")
 
 # Skip very large files — fix context only needs ordinary source files, and we
 # don't want to balloon disk on a vendored blob that slipped past ingestion.

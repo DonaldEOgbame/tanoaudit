@@ -11,7 +11,7 @@ from email.utils import parseaddr
 
 from app.core.config import settings
 
-logger = logging.getLogger("akira.email")
+logger = logging.getLogger("tanoaudit.email")
 
 # Records sent emails when SMTP is unconfigured — useful for tests/dev.
 sent_outbox: list[dict] = []

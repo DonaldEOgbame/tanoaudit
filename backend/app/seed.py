@@ -30,7 +30,7 @@ from app.services.fun_facts_seed import seed_fun_facts
 from app.services.learning_service import seed_learning_hub
 from app.services.repositories import link_scan_to_repo
 
-DEMO_EMAIL = "demo@akira.ai"
+DEMO_EMAIL = "demo@tanoaudit.ai"
 DEMO_PASSWORD = "demo-password-123"
 
 # (public_id, engine, category, subcategory, severity, file, ls, le, cwe, owasp, model, verified, summary, fix)
@@ -141,7 +141,7 @@ async def _get_or_create_user(db) -> User:
         display_name="Demo",
         email_verified=True,
         settings={"theme": "dark", "default_scan_mode": "Deep",
-                  "model_settings": {"default_tier": "akira_balanced"}},
+                  "model_settings": {"default_tier": "tanoaudit_balanced"}},
         privacy={"improve_ai": True, "store_scan_history": True},
         notifications={"scan_complete": True, "critical_found": True,
                        "watchlist_changed": True, "weekly_digest": False, "in_app": True},

@@ -26,7 +26,7 @@ TOOL_DEFINITIONS = [
     {
         "name": "fetch_audit_handoff",
         "description": (
-            "Fetch a structured security audit from Akira AI containing "
+            "Fetch a structured security audit from TanoAudit containing "
             "vulnerabilities and optimization findings with locations, "
             "descriptions, and suggested fixes."
         ),
@@ -35,7 +35,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "audit_url": {
                     "type": "string",
-                    "description": "The full Akira AI handoff URL",
+                    "description": "The full TanoAudit handoff URL",
                 }
             },
             "required": ["audit_url"],
@@ -58,7 +58,7 @@ TOOL_DEFINITIONS = [
 
 def _parse_handoff_url(url: str) -> tuple[str | None, str | None]:
     """Extract (audit_id, token) from a handoff URL like
-    https://akira.ai/handoff/{audit_id}?token=..."""
+    https://tanoaudit.ai/handoff/{audit_id}?token=..."""
     try:
         parsed = urlparse(url)
         token = (parse_qs(parsed.query).get("token") or [None])[0]
@@ -78,7 +78,7 @@ async def tool_fetch_audit_handoff(args: dict) -> str:
     url = (args or {}).get("audit_url", "")
     audit_id, token = _parse_handoff_url(url)
     if not audit_id or not token:
-        return "Error: could not parse audit_url. Expected an Akira AI handoff URL."
+        return "Error: could not parse audit_url. Expected an TanoAudit handoff URL."
 
     async with SessionLocal() as db:
         valid = await ho.validate_token(db, audit_id, token)

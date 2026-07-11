@@ -1,4 +1,4 @@
-"""FastAPI application factory for Akira AI."""
+"""FastAPI application factory for TanoAudit."""
 from __future__ import annotations
 
 import asyncio

@@ -1,4 +1,4 @@
-"""The full Akira AI vulnerability taxonomy: 27 categories + an attack-chain catalog.
+"""The full TanoAudit vulnerability taxonomy: 27 categories + an attack-chain catalog.
 
 Each class: (name, cwe, owasp, severity). CWE/OWASP/severity are best-effort
 hints used for the Learning Hub and finding cross-links. Educational content is

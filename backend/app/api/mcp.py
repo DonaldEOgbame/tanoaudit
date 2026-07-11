@@ -38,7 +38,7 @@ def _authorized(request: Request) -> bool:
 # resumable streams), which is conformant across all of these.
 SUPPORTED_PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]
-SERVER_INFO = {"name": "akira-ai", "version": "0.1.0"}
+SERVER_INFO = {"name": "tanoaudit-ai", "version": "0.1.0"}
 
 
 def _result(req_id, result: dict) -> dict:

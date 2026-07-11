@@ -312,7 +312,7 @@ async def update_repo_access(
     conn.repo_access = {"mode": body.mode, "selected": body.selected}
     await db.flush()
 
-    # Auto-register the Akira webhook on newly-selected repos so events actually
+    # Auto-register the TanoAudit webhook on newly-selected repos so events actually
     # reach us. create_webhook is idempotent (a duplicate hook is a no-op), and
     # this runs in the background so the settings save stays snappy.
     if body.mode == "selected":
@@ -396,7 +396,7 @@ async def register_webhook(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Auto-create the Akira AI webhook on a repo (push/PR/release)."""
+    """Auto-create the TanoAudit webhook on a repo (push/PR/release)."""
     conn = await _require_conn(db, user.id)
     token = decrypt_secret(conn.encrypted_token)
     full = f"{owner}/{repo}"

@@ -1,10 +1,10 @@
-// Akira AI — Notifications popover dropdown (top-bar bell menu)
+// TanoAudit — Notifications popover dropdown (top-bar bell menu)
 (function () {
   const React = window.React;
   const { useState, useEffect, useCallback } = React;
   const h = React.createElement;
   const Icons = window.Icons;
-  const API = window.AkiraAPI;
+  const API = window.TanoAuditAPI;
 
   function NotificationsPopover({ onClose, nav, toast, setUnreadCount }) {
     const [items, setItems] = useState([]);

@@ -15,7 +15,7 @@ class ChatRequest(BaseModel):
     # Conversation history (truncated by the client on edit/resend).
     messages: list[ChatMessage] = Field(default_factory=list)
     message: str = Field(min_length=1, max_length=4000)
-    # Optional Akira model tier id (see model_catalog). None -> default tier.
+    # Optional TanoAudit model tier id (see model_catalog). None -> default tier.
     tier: Optional[str] = None
 
 

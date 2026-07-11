@@ -20,7 +20,7 @@ async def _hit(key: str, limit: int, window: int) -> bool:
     """Return True if the call is allowed; False if over the limit."""
     now = int(time.time())
     bucket = now // window
-    full_key = f"akira:rl:{key}:{bucket}"
+    full_key = f"tanoaudit:rl:{key}:{bucket}"
     # In-memory fixed window.
     start, count = _local.get(full_key, (now, 0))
     count += 1

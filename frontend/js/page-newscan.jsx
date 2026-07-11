@@ -5,13 +5,13 @@
   const h = React.createElement;
   const Icons = window.Icons;
   const { Modal, SevDot } = window;
-  const API = window.AkiraAPI;
+  const API = window.TanoAuditAPI;
 
-  // Accent colors per Akira tier (purely cosmetic; vendor never referenced).
+  // Accent colors per TanoAudit tier (purely cosmetic; vendor never referenced).
   const TIER_COLORS = {
-    akira_fast: "#7aa2f7",
-    akira_balanced: "#9ece6a",
-    akira_deep: "#c792ea",
+    tanoaudit_fast: "#7aa2f7",
+    tanoaudit_balanced: "#9ece6a",
+    tanoaudit_deep: "#c792ea",
   };
 
   // Count of the user's custom-vulnerability rules, for the "active rules" copy.
@@ -109,17 +109,17 @@
   // overlapping ones. `depth` and `tier` map straight onto the backend contract
   // (Scan.depth + model_mode/models); `seg` mirrors the backend cap per depth.
   const PROFILES = [
-    { id: "fast", label: "Fast", tier: "akira_fast", time: "~5 min", seg: 120,
+    { id: "fast", label: "Fast", tier: "tanoaudit_fast", time: "~5 min", seg: 120,
       desc: "Surface pass — up to ~120 segments. Critical security issues and obvious code stubs." },
-    { id: "balanced", label: "Balanced", tier: "akira_balanced", depth: "deep", time: "~15 min", seg: 400,
+    { id: "balanced", label: "Balanced", tier: "tanoaudit_balanced", depth: "deep", time: "~15 min", seg: 400,
       desc: "Recommended. ~400 segments — full security, optimization, and stub/placeholder coverage." },
-    { id: "thorough", label: "Thorough", tier: "akira_deep", time: "~30 min", seg: 800,
+    { id: "thorough", label: "Thorough", tier: "tanoaudit_deep", time: "~30 min", seg: 800,
       desc: "Widest coverage — up to ~800 segments for large repositories." },
   ];
   // The backend `depth` value for a profile (defaults to the profile id, which
   // already matches the fast/thorough depth keys; balanced overrides to "deep").
   const profileDepth = (p) => p.depth || p.id;
-  const PROFILE_TIER_COLORS = { akira_fast: TIER_COLORS.akira_fast, akira_balanced: TIER_COLORS.akira_balanced, akira_deep: TIER_COLORS.akira_deep };
+  const PROFILE_TIER_COLORS = { tanoaudit_fast: TIER_COLORS.tanoaudit_fast, tanoaudit_balanced: TIER_COLORS.tanoaudit_balanced, tanoaudit_deep: TIER_COLORS.tanoaudit_deep };
 
   function NewScanModal({ onClose, onStart }) {
     const [step, setStep] = useState(1);
@@ -232,7 +232,7 @@
       : customCount + (customCount === 1 ? " active rule" : " active rules") + " from your library";
     return h("div", { className: "step-panel" + (dir === "back" ? " back" : "") },
       h("h3", { style: { fontSize: 16, fontWeight: 650, marginBottom: 4 } }, "Scan configuration"),
-      h("p", { style: { fontSize: 12.5, color: "var(--text-3)", marginBottom: 14 } }, "Each profile sets how much of the repo Akira scans. It automatically reroutes around rate limits."),
+      h("p", { style: { fontSize: 12.5, color: "var(--text-3)", marginBottom: 14 } }, "Each profile sets how much of the repo TanoAudit scans. It automatically reroutes around rate limits."),
       h("label", { className: "flabel" }, "Scan profile"),
       h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 18 } },
         PROFILES.map((p) => {
@@ -268,7 +268,7 @@
   function StepReview({ dir, source, profile, incCustom, incOpt, customCount }) {
     const customLabel = !incCustom ? "Off" : (customCount == null ? "On" : (customCount + " active"));
     const srcLabel = source.tab === "github" ? source.repo : source.tab === "url" ? (source.url || "—") : (source.fileName || "uploaded.zip");
-    const TIER_NAMES = { akira_fast: "Akira Fast", akira_balanced: "Akira Balanced", akira_deep: "Akira Deep" };
+    const TIER_NAMES = { tanoaudit_fast: "Fast", tanoaudit_balanced: "Balanced", tanoaudit_deep: "Deep" };
     const rows = [
       ["Source", srcLabel, "github"],
       ["Profile", profile.label + " · " + profile.time, "clock"],

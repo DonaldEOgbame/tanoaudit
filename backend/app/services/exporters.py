@@ -67,7 +67,7 @@ th, td {{ border: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-a
 th {{ background: #f4f4f5; }}
 .scores {{ margin: 16px 0; font-size: 14px; }}
 </style></head><body>
-<h1>Akira AI Security Audit — {escape(scan.repo or scan.id)}</h1>
+<h1>TanoAudit Security Audit — {escape(scan.repo or scan.id)}</h1>
 <div class="scores">
   Branch: {escape(scan.branch or '—')} @ {escape(scan.commit or '—')}<br>
   Security score: <b>{scan.security_score}/100</b> ·

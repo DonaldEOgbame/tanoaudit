@@ -50,6 +50,6 @@ async def send_weekly_digests() -> int:
 
     for uid, text in texts.items():
         if text:
-            await notify(uid, N_WEEKLY_DIGEST, "Your Akira AI weekly digest", text)
+            await notify(uid, N_WEEKLY_DIGEST, "Your TanoAudit weekly digest", text)
             sent += 1
     return sent

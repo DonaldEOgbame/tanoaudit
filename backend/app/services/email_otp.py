@@ -45,7 +45,7 @@ async def issue_code(
     await db.flush()
     await send_email(
         user.email,
-        "Your Akira AI verification code",
+        "Your TanoAudit verification code",
         f"Your verification code is {code}. It expires in {CODE_TTL_MINUTES} minutes.\n\n"
         "If you didn't request this, you can ignore this email.",
     )
